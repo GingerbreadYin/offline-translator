@@ -48,8 +48,9 @@ class OfflineTranslator:
         if self.engine is None:
             import ctranslate2
             import sentencepiece
-            self.engine = ctranslate2.Translator(str(self.root / "model"), device="cpu", compute_type="int8", inter_threads=1, intra_threads=4)
-            self.tokenizer = sentencepiece.SentencePieceProcessor(model_file=str(self.root / "sentencepiece.model"))
+            tokenizer = sentencepiece.SentencePieceProcessor(model_proto=(self.root / "sentencepiece.model").read_bytes())
+            engine = ctranslate2.Translator(str(self.root / "model"), device="cpu", compute_type="int8", inter_threads=1, intra_threads=4)
+            self.tokenizer, self.engine = tokenizer, engine
         # Preserve explicit links and code spans without sending them through translation.
         chunks = re.split(r"(https?://[^\s]+|`[^`]+`)", text)
         outputs = []

@@ -37,3 +37,11 @@ def test_real_worker_process_recognizes_and_returns_dictionary():
     assert report["worker_process"] is True
     assert report["word"] == "issue"
     assert report["meanings"] > 1
+
+
+def test_translation_resources_load_from_chinese_directory(tmp_path):
+    import shutil
+    destination = tmp_path / "中文资源目录"
+    shutil.copytree(ROOT / "translation", destination)
+    result = OfflineTranslator(destination).translate("This project is open source.")
+    assert "项目" in result and "开源" in result
