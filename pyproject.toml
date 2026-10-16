@@ -1,0 +1,9 @@
+[project]
+name = "offline-translator"
+version = "0.1.0"
+description = "Windows offline region translator with dictionary sense navigation"
+requires-python = ">=3.12,<3.13"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

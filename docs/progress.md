@@ -1,0 +1,11 @@
+# SDD ledger — plan: 离线翻译工具实施计划.md
+
+Ruling: Build in a new independent repository on build/v0.1, without a linked worktree — no existing product repository or changes to protect — cost if wrong: move project checkout later.
+Ruling: Use Python 3.12 + PySide6 instead of C#/WPF — no installed SDK; OCR and translation dependencies expose Python interfaces — cost if wrong: UI migration and larger package.
+Ruling: Use RapidOCR's packaged ONNX models directly, ECDICT SQLite, and Argos English-Chinese language package through CTranslate2/SentencePiece — avoids full Umi UI and full Argos framework dependencies — cost if wrong: replace service adapters; validate actual model compatibility first.
+Ruling: First portable delivery bundles validated resources; later releases can add first-run downloading — user wants a usable executable and this avoids a downloader before proving offline quality — cost if wrong: larger initial download. Source includes resource preparation script for reproducibility.
+Ruling: User approved dictionary-default sense rather than a frequency claim; no statistical ordering promised.
+Pre-flight: workflow produces request IDs and accepts result IDs; UI uses same ID to suppress stale results.
+Pre-flight: lookup returns structured meanings plus text; UI navigator consumes that shape.
+Pre-flight: resource preparation produces SQLite plus model directory; service adapters consume exact manifest paths.
+Tasks: 1 resources/environment in progress; 2 storage; 3 workflow; 4 services; 5 hotkeys/tray; 6 capture/results; 7 acceptance; 8 package/GitHub.

@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+.pytest_cache/
+build/
+dist/
+resources/*
+!resources/manifest.json
+*.spec
+.superpowers/
+*.log
+*.png
+*.zip
