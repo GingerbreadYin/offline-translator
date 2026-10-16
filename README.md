@@ -50,10 +50,13 @@ New-Item -ItemType Directory -Force build | Out-Null
 .\.venv\Scripts\python.exe -m pytest -q --basetemp=build/test-temp
 .\.venv\Scripts\python.exe main.py --self-test
 .\.venv\Scripts\python.exe main.py --ui-smoke
+.\.venv\Scripts\python.exe main.py --worker-test
 powershell -ExecutionPolicy Bypass -File scripts\publish.ps1
 ```
 
 `--self-test`验证资源校验和及真实OCR/翻译，不访问网络；输出使用合成英文样本。测试数据不会包含用户阅读内容。没有准备大模型时，相关模型集成测试会跳过，单元/界面测试仍可执行。
+
+打包脚本还会检查最终exe的资源推理、独立推理进程与界面启动/退出，任一失败均不生成新的发行ZIP。
 
 ## 后续迭代
 
