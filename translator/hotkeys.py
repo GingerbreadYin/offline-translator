@@ -43,32 +43,47 @@ class Hotkeys:
     def __init__(self, backend=None):
         self.backend = backend or Win32Backend()
         self.bindings = []
+        self.registered = {}
+        self.enabled = True
 
-    def apply(self, bindings):
+    def apply(self, bindings, enabled=True):
         validate_bindings(bindings)
         parsed = [parse_hotkey(b) for b in bindings]
-        if len(set(parsed)) != 3:
-            raise ValueError("三个快捷键不能重复")
+        if len(set(parsed)) != 4:
+            raise ValueError("四个快捷键不能重复")
         previous = self.bindings[:]
-        self.close()
-        registered = []
-        for i, (modifiers, key) in enumerate(parsed):
-            if not self.backend.register(100 + i, modifiers, key):
-                for id_ in registered:
-                    self.backend.unregister(id_)
+        previous_registered = self.registered.copy()
+        previous_enabled = self.enabled
+        desired = {100+i: parsed[i] for i in (range(4) if enabled else [3])}
+        kept = {id_: pair for id_, pair in previous_registered.items() if desired.get(id_) == pair}
+        removed = {id_: pair for id_, pair in previous_registered.items() if id_ not in kept}
+        for id_ in removed:
+            self.backend.unregister(id_)
+        registered = kept.copy()
+        for id_, pair in desired.items():
+            if id_ in kept:
+                continue
+            if not self.backend.register(id_, *pair):
+                for added in registered.keys() - kept.keys():
+                    self.backend.unregister(added)
                 restored = True
-                for j, old in enumerate(previous):
-                    restored = self.backend.register(100 + j, *parse_hotkey(old)) and restored
+                for old_id, old_pair in removed.items():
+                    restored = self.backend.register(old_id, *old_pair) and restored
                 self.bindings = previous if restored else []
+                self.registered = previous_registered if restored else {}
+                self.enabled = previous_enabled
                 if not restored:
-                    for j in range(3):
-                        self.backend.unregister(100 + j)
+                    for old_id in previous_registered:
+                        self.backend.unregister(old_id)
                 detail = "已保留原绑定" if restored else "原绑定也无法恢复，请重新设置"
-                raise ValueError(f"快捷键 {bindings[i]} 被占用或受系统限制；{detail}")
-            registered.append(100 + i)
+                raise ValueError(f"快捷键 {bindings[id_-100]} 被占用或受系统限制；{detail}")
+            registered[id_] = pair
         self.bindings = bindings[:]
+        self.registered = registered
+        self.enabled = enabled
 
     def close(self):
-        for i in range(len(self.bindings)):
-            self.backend.unregister(100 + i)
+        for id_ in self.registered:
+            self.backend.unregister(id_)
         self.bindings = []
+        self.registered = {}

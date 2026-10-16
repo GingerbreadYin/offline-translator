@@ -16,9 +16,10 @@ def main():
     parser.add_argument("--worker-test", action="store_true")
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
+    switch_checked = False
     def mark(stage):
         if args.ui_smoke and args.report:
-            args.report.write_text(json.dumps({"stage": stage}), encoding="utf-8")
+            args.report.write_text(json.dumps({"stage": stage, "enable_toggle_checked": switch_checked}), encoding="utf-8")
     if args.self_test or args.worker_test:
         from tools.probe import probe, probe_worker
         data = probe_worker(resource_root()) if args.worker_test else probe(resource_root())
@@ -41,7 +42,7 @@ def main():
     # QLocalServer prevents duplicate instances without modifying user data.
     server = QLocalServer()
     socket = QLocalSocket()
-    name = "OfflineTranslator-v01-local"
+    name = "OfflineTranslator-ui-smoke-local" if args.ui_smoke else "OfflineTranslator-v01-local"
     socket.connectToServer(name)
     if socket.waitForConnected(200):
         return
@@ -49,17 +50,39 @@ def main():
     if not server.listen(name):
         raise RuntimeError("无法建立本机单实例服务")
     mark("creating-controller")
+    if args.ui_smoke:
+        from translator.core import SettingsStore
+        SettingsStore(Path("build/smoke-settings.json")).save({"bindings": ["Ctrl+Alt+F21", "Ctrl+Alt+F22", "Ctrl+Alt+F23", "Ctrl+Alt+F24"]})
     controller = Controller(app, resource_root(), Path("build/smoke-settings.json") if args.ui_smoke else None)
     mark("controller-ready")
     if args.ui_smoke:
         def finish_smoke():
-            mark("shutdown-started")
-            controller.shutdown()
-            mark("shutdown-complete")
+            nonlocal switch_checked
+            try:
+                controller.settings_window.hide()
+                assert set(controller.hotkeys.registered) == {100,101,102,103}, controller.settings_window.status.text()
+                controller.action(3)
+                assert not controller.enabled and set(controller.hotkeys.registered) == {103}
+                controller.action(0)
+                assert controller.flow.state == "idle"
+                controller.action(3)
+                assert controller.enabled and set(controller.hotkeys.registered) == {100,101,102,103}
+                switch_checked = True
+                mark("shutdown-started")
+                controller.shutdown()
+                assert not controller.hotkeys.registered
+                mark("shutdown-complete")
+            except Exception:
+                import traceback
+                if args.report:
+                    args.report.write_text(traceback.format_exc(), encoding="utf-8")
+                controller.shutdown()
+                app.exit(1)
         QTimer.singleShot(1500, finish_smoke)
     app.aboutToQuit.connect(server.close)
     exit_code = app.exec()
-    mark("event-loop-exited")
+    if exit_code == 0:
+        mark("event-loop-exited")
     sys.exit(exit_code)
 
 

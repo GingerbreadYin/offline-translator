@@ -64,11 +64,12 @@ def test_result_background_stays_readable_with_dark_system_palette(app):
 
 def test_editing_shortcuts_suspends_global_keys_and_close_restores(app, tmp_path):
     class Keys:
-        def __init__(self): self.bindings = ["F6", "F7", "F8"]
+        def __init__(self): self.bindings = ["F6", "F7", "F8", "F9"]
         def close(self): self.bindings = []
-        def apply(self, bindings): self.bindings = bindings[:]
+        def apply(self, bindings, enabled=True): self.bindings = bindings[:]
     class Owner:
-        settings = {"bindings": ["F6", "F7", "F8"]}
+        settings = {"bindings": ["F6", "F7", "F8", "F9"]}
+        enabled = True
         hotkeys = Keys()
         resources = tmp_path
         store = SettingsStore(tmp_path / "settings.json")
@@ -80,4 +81,80 @@ def test_editing_shortcuts_suspends_global_keys_and_close_restores(app, tmp_path
     assert owner.hotkeys.bindings == []
     window.close()
     app.processEvents()
-    assert owner.hotkeys.bindings == ["F6", "F7", "F8"]
+    assert owner.hotkeys.bindings == ["F6", "F7", "F8", "F9"]
+
+
+@pytest.fixture
+def controller(app, tmp_path, monkeypatch):
+    import translator.ui as ui
+    from translator.hotkeys import Hotkeys
+    class Backend:
+        def __init__(self): self.active, self.occupied = {}, set()
+        def register(self, id_, modifiers, key):
+            if key in self.occupied: return False
+            self.active[id_] = (modifiers, key)
+            return True
+        def unregister(self, id_): self.active.pop(id_, None)
+    class Worker:
+        def __init__(self, **kwargs): self.pending = None
+        def cancel_pending(self): self.pending = None
+        def poll(self): return []
+        def close(self): pass
+    backend = Backend()
+    monkeypatch.setattr(ui, "Hotkeys", lambda: Hotkeys(backend))
+    monkeypatch.setattr(ui, "ProcessWorker", Worker)
+    owner = ui.Controller(app, tmp_path, tmp_path / "settings.json")
+    owner.settings_window.hide()
+    app.processEvents()
+    yield owner, backend
+    owner.shutdown()
+    app.removeNativeEventFilter(owner.native)
+    owner.settings_window.close()
+    owner.result.close()
+    app.processEvents()
+
+
+def test_pause_cancels_result_and_resume_restores_four_keys(controller):
+    from translator.core import Result
+    owner, backend = controller
+    owner.flow.toggle()
+    job = owner.flow.begin()
+    owner.result.display("正在翻译", "测试", (100,200,40,20), (0,0,800,600))
+    owner.action(3)
+    assert not owner.enabled
+    assert owner.flow.state == "idle"
+    assert not owner.result.isVisible()
+    assert set(backend.active) == {103}
+    owner.finished(job, Result("test", translation="测试"), "")
+    assert owner.last_result is None
+    owner.action(0)
+    assert owner.flow.state == "idle" and not owner.overlays
+    owner.action(3)
+    assert owner.enabled and set(backend.active) == {100,101,102,103}
+    assert "已启用" in owner.tray.toolTip()
+
+
+def test_failed_resume_and_settings_close_preserve_paused_scope(controller, app):
+    owner, backend = controller
+    owner.action(3)
+    backend.occupied.add(20)
+    owner.action(3)
+    assert not owner.enabled and set(backend.active) == {103}
+    backend.occupied.clear()
+    owner.settings_window.show()
+    app.processEvents()
+    assert not backend.active
+    owner.settings_window.hide()
+    app.processEvents()
+    assert not owner.enabled and set(backend.active) == {103}
+
+
+def test_fourth_native_hotkey_reaches_enable_toggle(controller, app):
+    import ctypes
+    from ctypes import wintypes
+    owner, _ = controller
+    message = wintypes.MSG()
+    message.message, message.wParam = 0x312, 103
+    assert owner.native.nativeEventFilter(b"windows_generic_MSG", ctypes.addressof(message)) == (True, 0)
+    app.processEvents()
+    assert not owner.enabled

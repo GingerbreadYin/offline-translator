@@ -13,7 +13,8 @@ from PySide6.QtWidgets import (QApplication, QDialog, QFormLayout, QHBoxLayout,
     QKeySequenceEdit, QLabel, QMenu, QMessageBox, QPushButton, QScrollArea,
     QSystemTrayIcon, QVBoxLayout, QWidget)
 
-from .core import Navigator, SettingsStore, Workflow, place_result
+from .core import Navigator, SettingsStore, Workflow, place_result, default_settings
+from . import __version__
 from .hotkeys import Hotkeys
 from .worker import ProcessWorker
 
@@ -35,7 +36,7 @@ class NativeFilter(QAbstractNativeEventFilter):
     def nativeEventFilter(self, event_type, message):
         if event_type in (b"windows_generic_MSG", b"windows_dispatcher_MSG"):
             msg = wintypes.MSG.from_address(int(message))
-            if msg.message == 0x0312 and 100 <= msg.wParam <= 102:
+            if msg.message == 0x0312 and 100 <= msg.wParam <= 103:
                 action = int(msg.wParam) - 100
                 QTimer.singleShot(0, lambda: self.callback(action))
                 return True, 0
@@ -167,7 +168,7 @@ class SettingsWindow(QDialog):
         layout.addWidget(description)
         form = QFormLayout()
         self.edits = []
-        for label, binding in zip(("框选 / 关闭", "上一个词义", "下一个词义"), owner.settings["bindings"]):
+        for label, binding in zip(("框选 / 关闭", "上一个词义", "下一个词义", "启用 / 暂停"), owner.settings["bindings"]):
             edit = QKeySequenceEdit(QKeySequence(binding))
             edit.setMaximumSequenceLength(1)
             self.edits.append(edit)
@@ -180,12 +181,12 @@ class SettingsWindow(QDialog):
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         buttons = QHBoxLayout()
-        save = QPushButton("保存并启用")
+        save = QPushButton("保存快捷键")
         save.clicked.connect(self.save)
-        test = QPushButton("开始框选")
-        test.clicked.connect(self.start)
+        self.start_button = QPushButton("开始框选")
+        self.start_button.clicked.connect(self.start)
         buttons.addWidget(save)
-        buttons.addWidget(test)
+        buttons.addWidget(self.start_button)
         layout.addLayout(buttons)
         resources_ok = (owner.resources / "dictionary.db").exists() and (owner.resources / "translation/model/model.bin").exists()
         self.status.setText("资源已准备，日常使用无需联网。软件关闭窗口后继续常驻托盘。" if resources_ok else "资源缺失，请运行资源准备脚本或使用完整发行包。")
@@ -194,15 +195,15 @@ class SettingsWindow(QDialog):
         bindings = [e.keySequence().toString(QKeySequence.SequenceFormat.PortableText) for e in self.edits]
         previous = self.owner.settings["bindings"][:]
         try:
-            self.owner.hotkeys.apply(bindings)
-            settings = {"bindings": bindings}
+            self.owner.hotkeys.apply(bindings, enabled=self.owner.enabled)
+            settings = {"bindings": bindings, "schema_version": 2}
             try:
                 self.owner.store.save(settings)
             except OSError:
-                self.owner.hotkeys.apply(previous)
+                self.owner.hotkeys.apply(previous, enabled=self.owner.enabled)
                 raise
             self.owner.settings = settings
-            self.status.setText("快捷键已保存并生效。")
+            self.status.setText("快捷键已保存。" + ("翻译已启用。" if self.owner.enabled else "翻译仍处于暂停状态。"))
             self.hide()
         except (ValueError, OSError) as exc:
             QMessageBox.warning(self, "无法保存", str(exc))
@@ -216,8 +217,11 @@ class SettingsWindow(QDialog):
         super().showEvent(event)
 
     def hideEvent(self, event):
+        if getattr(self.owner, "shutting_down", False):
+            super().hideEvent(event)
+            return
         try:
-            self.owner.hotkeys.apply(self.owner.settings["bindings"])
+            self.owner.hotkeys.apply(self.owner.settings["bindings"], enabled=self.owner.enabled)
         except ValueError as exc:
             self.status.setText(str(exc))
             if hasattr(self.owner, "tray"):
@@ -229,12 +233,14 @@ class Controller(QObject):
     def __init__(self, app, resources, settings_path=None):
         super().__init__()
         self.app, self.resources = app, Path(resources)
+        self.enabled = True
+        self.shutting_down = False
         self.store = SettingsStore(settings_path or Path(os.getenv("LOCALAPPDATA", str(Path.home()))) / "OfflineTranslator/settings.json")
         try:
             self.settings = self.store.load()
         except ValueError as exc:
             QMessageBox.warning(None, "配置错误", str(exc))
-            self.settings = {"bindings": ["Ctrl+Alt+Q", "Ctrl+Alt+Up", "Ctrl+Alt+Down"]}
+            self.settings = default_settings()
         self.flow = Workflow()
         self.worker = ProcessWorker(config=str(resources))
         self.hotkeys = Hotkeys()
@@ -254,9 +260,12 @@ class Controller(QObject):
         painter.drawText(icon.rect(), Qt.AlignmentFlag.AlignCenter, "译")
         painter.end()
         self.tray = QSystemTrayIcon(QIcon(icon), self)
-        self.tray.setToolTip("离线框选翻译 v0.1.0")
+        self.tray.setToolTip(f"离线框选翻译 v{__version__} · 已启用")
         menu = QMenu()
-        menu.addAction("开始框选", self.toggle)
+        self.enable_action = menu.addAction("启用翻译", self.toggle_enabled)
+        self.enable_action.setCheckable(True)
+        self.enable_action.setChecked(True)
+        self.capture_action = menu.addAction("开始框选", self.toggle)
         menu.addAction("设置", self.open_settings)
         menu.addSeparator()
         menu.addAction("退出", self.shutdown)
@@ -274,6 +283,28 @@ class Controller(QObject):
         self.worker_timer.timeout.connect(self.poll_worker)
         self.worker_timer.start(40)
         self.settings_window.show()
+
+    def update_enabled_status(self):
+        status = "已启用" if self.enabled else "已暂停"
+        self.tray.setToolTip(f"离线框选翻译 v{__version__} · {status}")
+        self.enable_action.setChecked(self.enabled)
+        self.capture_action.setEnabled(self.enabled)
+        self.settings_window.start_button.setEnabled(self.enabled)
+        self.settings_window.status.setText(f"当前：{status}。启用／暂停快捷键：{self.settings['bindings'][3]}。")
+
+    def toggle_enabled(self):
+        requested = not self.enabled
+        try:
+            if not self.settings_window.isVisible():
+                self.hotkeys.apply(self.settings["bindings"], enabled=requested)
+        except ValueError as exc:
+            self.enable_action.setChecked(self.enabled)
+            self.tray.showMessage("无法恢复快捷键", str(exc))
+            return
+        self.enabled = requested
+        if not self.enabled:
+            self.cancel()
+        self.update_enabled_status()
 
     def poll_worker(self):
         try:
@@ -295,7 +326,11 @@ class Controller(QObject):
             self.cancel()
 
     def action(self, action):
-        if action == 0:
+        if action == 3:
+            self.toggle_enabled()
+        elif not self.enabled:
+            return
+        elif action == 0:
             self.toggle()
         elif self.flow.state == "showing" and self.navigator.meanings:
             self.navigator.move(-1 if action == 1 else 1)
@@ -316,6 +351,8 @@ class Controller(QObject):
         self.last_result = None
 
     def toggle(self):
+        if not self.enabled:
+            return
         if self.flow.state != "idle":
             self.cancel()
             return
@@ -333,7 +370,8 @@ class Controller(QObject):
                 overlay.activateWindow()
 
     def selected(self, image, selection, area):
-        if self.flow.state != "selecting":
+        if not self.enabled or self.flow.state != "selecting":
+            image.close()
             return
         self.clear_overlays()
         self.selection, self.area = selection, area
@@ -365,6 +403,7 @@ class Controller(QObject):
         self.result.display(text, caption, self.selection, self.area)
 
     def shutdown(self):
+        self.shutting_down = True
         self.cancel()
         self.hotkeys.close()
         self.escape_timer.stop()

@@ -2,6 +2,7 @@ $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path -Parent $PSScriptRoot)
 $env:PYTHONUTF8 = '1'
 $pythonExe = Join-Path (Get-Location) '.venv/Scripts/python.exe'
+$version = (& $pythonExe -c "from translator import __version__; print(__version__)").Trim()
 New-Item -ItemType Directory -Force build | Out-Null
 & $pythonExe -m pytest -q --basetemp=build/test-temp
 if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
@@ -28,7 +29,8 @@ foreach ($mode in @('self-test','worker-test','ui-smoke')) {
     $report = Get-Content -LiteralPath $reportPath -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($mode -eq 'ui-smoke' -and $report.stage -ne 'event-loop-exited') { throw 'UI did not reach clean shutdown' }
 }
-$archive = Join-Path (Get-Location) 'dist/OfflineTranslator-v0.1.0-win-x64.zip'
-& $pythonExe -c "import shutil; shutil.make_archive('dist/OfflineTranslator-v0.1.0-win-x64', 'zip', 'dist', 'OfflineTranslator')"
+$archiveBase = "dist/OfflineTranslator-v$version-win-x64"
+$archive = Join-Path (Get-Location) "$archiveBase.zip"
+& $pythonExe -c "import shutil,sys; shutil.make_archive(sys.argv[1], 'zip', 'dist', 'OfflineTranslator')" $archiveBase
 if ($LASTEXITCODE -ne 0) { throw 'ZIP creation failed' }
 Get-FileHash -LiteralPath $archive -Algorithm SHA256 | Format-List

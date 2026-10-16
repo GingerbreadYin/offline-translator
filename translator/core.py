@@ -5,6 +5,13 @@ import os
 from pathlib import Path
 import re
 
+DEFAULT_BINDINGS = ("CapsLock", ",", ".", "Ctrl+Q")
+LEGACY_DEFAULT_BINDINGS = ("Ctrl+Alt+Q", "Ctrl+Alt+Up", "Ctrl+Alt+Down")
+
+
+def default_settings():
+    return {"bindings": list(DEFAULT_BINDINGS), "schema_version": 2}
+
 
 @dataclass(frozen=True)
 class Meaning:
@@ -92,8 +99,8 @@ def place_result(selection, size, area):
 
 
 def validate_bindings(bindings):
-    if len(bindings) != 3 or len({b.lower() for b in bindings}) != 3:
-        raise ValueError("三个快捷键不能为空或重复")
+    if not isinstance(bindings, list) or len(bindings) != 4 or not all(isinstance(b, str) for b in bindings) or len({b.lower() for b in bindings}) != 4:
+        raise ValueError("四个快捷键不能为空或重复")
     for binding in bindings:
         parts = binding.split("+")
         if not binding or parts[-1].lower() in {"ctrl", "alt", "shift", "win", "meta", "esc", "escape"}:
@@ -106,9 +113,17 @@ class SettingsStore:
 
     def load(self):
         if not self.path.exists():
-            return {"bindings": ["Ctrl+Alt+Q", "Ctrl+Alt+Up", "Ctrl+Alt+Down"]}
+            return default_settings()
         try:
             settings = json.loads(self.path.read_text(encoding="utf-8"))
+            bindings = settings["bindings"]
+            if isinstance(bindings, list) and len(bindings) == 3 and all(isinstance(b, str) for b in bindings):
+                if [b.lower() for b in bindings] == [b.lower() for b in LEGACY_DEFAULT_BINDINGS]:
+                    settings = default_settings()
+                else:
+                    occupied = {b.lower() for b in bindings}
+                    toggle = next(b for b in ("Ctrl+Q", "Ctrl+Alt+S", "Ctrl+Alt+F12", "Ctrl+Alt+F11") if b.lower() not in occupied)
+                    settings = {"bindings": bindings + [toggle], "schema_version": 2}
             validate_bindings(settings["bindings"])
             return settings
         except (ValueError, KeyError, TypeError) as exc:
