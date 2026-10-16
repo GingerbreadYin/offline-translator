@@ -29,16 +29,21 @@ QKeySequenceEdit {padding: 8px; background: white; border: 1px solid #cbd5e1; bo
 
 
 class NativeFilter(QAbstractNativeEventFilter):
-    def __init__(self, callback):
+    def __init__(self, callback, epoch_provider=None):
         super().__init__()
         self.callback = callback
+        self.epoch_provider = epoch_provider
 
     def nativeEventFilter(self, event_type, message):
         if event_type in (b"windows_generic_MSG", b"windows_dispatcher_MSG"):
             msg = wintypes.MSG.from_address(int(message))
             if msg.message == 0x0312 and 100 <= msg.wParam <= 103:
                 action = int(msg.wParam) - 100
-                QTimer.singleShot(0, lambda: self.callback(action))
+                epoch = self.epoch_provider(action) if self.epoch_provider else None
+                def dispatch():
+                    if self.epoch_provider is None or epoch == self.epoch_provider(action):
+                        self.callback(action)
+                QTimer.singleShot(0, dispatch)
                 return True, 0
         return False, 0
 
@@ -213,6 +218,8 @@ class SettingsWindow(QDialog):
         QTimer.singleShot(180, self.owner.toggle)
 
     def showEvent(self, event):
+        if hasattr(self.owner, "invalidate_shortcuts"):
+            self.owner.invalidate_shortcuts()
         self.owner.hotkeys.close()
         super().showEvent(event)
 
@@ -220,12 +227,23 @@ class SettingsWindow(QDialog):
         if getattr(self.owner, "shutting_down", False):
             super().hideEvent(event)
             return
+        if hasattr(self.owner, "invalidate_shortcuts"):
+            self.owner.invalidate_shortcuts()
         try:
             self.owner.hotkeys.apply(self.owner.settings["bindings"], enabled=self.owner.enabled)
         except ValueError as exc:
-            self.status.setText(str(exc))
+            message = str(exc)
+            if self.owner.enabled:
+                self.owner.enabled = False
+                self.owner.cancel()
+                try:
+                    self.owner.hotkeys.apply(self.owner.settings["bindings"], enabled=False)
+                except ValueError as fallback:
+                    message += "\n" + str(fallback)
+                self.owner.update_enabled_status()
+            self.status.setText(message)
             if hasattr(self.owner, "tray"):
-                self.owner.tray.showMessage("快捷键未启用", str(exc))
+                self.owner.tray.showMessage("快捷键未启用", message)
         super().hideEvent(event)
 
 
@@ -235,6 +253,8 @@ class Controller(QObject):
         self.app, self.resources = app, Path(resources)
         self.enabled = True
         self.shutting_down = False
+        self.shortcut_epoch = 0
+        self.translation_epoch = 0
         self.store = SettingsStore(settings_path or Path(os.getenv("LOCALAPPDATA", str(Path.home()))) / "OfflineTranslator/settings.json")
         try:
             self.settings = self.store.load()
@@ -244,7 +264,7 @@ class Controller(QObject):
         self.flow = Workflow()
         self.worker = ProcessWorker(config=str(resources))
         self.hotkeys = Hotkeys()
-        self.native = NativeFilter(self.action)
+        self.native = NativeFilter(self.action, self.hotkey_epoch)
         app.installNativeEventFilter(self.native)
         self.result = ResultWindow()
         self.result.closed.connect(self.cancel)
@@ -292,7 +312,15 @@ class Controller(QObject):
         self.settings_window.start_button.setEnabled(self.enabled)
         self.settings_window.status.setText(f"当前：{status}。启用／暂停快捷键：{self.settings['bindings'][3]}。")
 
+    def invalidate_shortcuts(self):
+        self.shortcut_epoch += 1
+
+    def hotkey_epoch(self, action):
+        return self.shortcut_epoch, (0 if action == 3 else self.translation_epoch)
+
     def toggle_enabled(self):
+        if self.shutting_down:
+            return
         requested = not self.enabled
         try:
             if not self.settings_window.isVisible():
@@ -302,6 +330,7 @@ class Controller(QObject):
             self.tray.showMessage("无法恢复快捷键", str(exc))
             return
         self.enabled = requested
+        self.translation_epoch += 1
         if not self.enabled:
             self.cancel()
         self.update_enabled_status()
@@ -326,6 +355,8 @@ class Controller(QObject):
             self.cancel()
 
     def action(self, action):
+        if self.shutting_down:
+            return
         if action == 3:
             self.toggle_enabled()
         elif not self.enabled:
@@ -351,7 +382,7 @@ class Controller(QObject):
         self.last_result = None
 
     def toggle(self):
-        if not self.enabled:
+        if self.shutting_down or not self.enabled:
             return
         if self.flow.state != "idle":
             self.cancel()
@@ -404,6 +435,7 @@ class Controller(QObject):
 
     def shutdown(self):
         self.shutting_down = True
+        self.invalidate_shortcuts()
         self.cancel()
         self.hotkeys.close()
         self.escape_timer.stop()

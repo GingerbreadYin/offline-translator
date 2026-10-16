@@ -158,3 +158,49 @@ def test_fourth_native_hotkey_reaches_enable_toggle(controller, app):
     assert owner.native.nativeEventFilter(b"windows_generic_MSG", ctypes.addressof(message)) == (True, 0)
     app.processEvents()
     assert not owner.enabled
+
+
+def test_late_toggle_after_exit_does_not_reregister_shortcuts(controller):
+    owner, backend = controller
+    owner.shutdown()
+    owner.action(3)
+    assert not backend.active
+
+
+def test_failed_resume_from_settings_restores_paused_toggle(controller, app):
+    owner, backend = controller
+    owner.action(3)
+    owner.settings_window.show()
+    app.processEvents()
+    owner.toggle_enabled()  # tray menu while settings are visible
+    backend.occupied.add(20)
+    owner.settings_window.hide()
+    app.processEvents()
+    assert not owner.enabled
+    assert set(backend.active) == {103}
+    assert "已暂停" in owner.tray.toolTip()
+
+
+def test_capture_queued_before_pause_does_not_reappear_on_resume(controller, app):
+    import ctypes
+    from ctypes import wintypes
+    owner, _ = controller
+    message = wintypes.MSG()
+    message.message, message.wParam = 0x312, 100
+    owner.native.nativeEventFilter(b"windows_generic_MSG", ctypes.addressof(message))
+    owner.action(3)
+    owner.action(3)
+    app.processEvents()
+    assert owner.flow.state == "idle" and not owner.overlays
+
+
+def test_two_distinct_queued_enable_presses_both_take_effect(controller, app):
+    import ctypes
+    from ctypes import wintypes
+    owner, _ = controller
+    message = wintypes.MSG()
+    message.message, message.wParam = 0x312, 103
+    owner.native.nativeEventFilter(b"windows_generic_MSG", ctypes.addressof(message))
+    owner.native.nativeEventFilter(b"windows_generic_MSG", ctypes.addressof(message))
+    app.processEvents()
+    assert owner.enabled
