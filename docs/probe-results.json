@@ -6,19 +6,19 @@
       "input": "issue",
       "ocr": "issue",
       "result": "n. 发行",
-      "seconds": 1.947
+      "seconds": 2.553
     },
     {
       "input": "This project is open source.",
       "ocr": "This project is open source.",
       "result": "这个项目是开源的.",
-      "seconds": 0.845
+      "seconds": 1.106
     },
     {
       "input": "Please open the settings window.",
       "ocr": "Please open the settings window.",
       "result": "请打开设置窗口 。",
-      "seconds": 0.581
+      "seconds": 0.759
     }
   ]
 }

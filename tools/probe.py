@@ -27,3 +27,23 @@ def probe(root):
         results.append({"input": sample, "ocr": recognized, "result": (result.meanings[0].pos + " " + result.meanings[0].text) if result.meanings else result.translation, "seconds": elapsed})
         image.close()
     return {"offline": True, "fixtures": "synthetic screen text; real manga not yet tested", "samples": results}
+
+
+def probe_worker(root):
+    from translator.worker import ProcessWorker
+    image = Image.new("RGB", (400, 100), "white")
+    ImageDraw.Draw(image).text((20, 28), "issue", fill="black", font=ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 32))
+    worker = ProcessWorker(config=str(root))
+    worker.submit((1, image.size, image.tobytes()))
+    image.close()
+    deadline = time.monotonic() + 30
+    try:
+        while time.monotonic() < deadline:
+            for job, result, error in worker.poll():
+                if error or not result or result.original.lower() != "issue" or not result.meanings:
+                    raise AssertionError(error or "Worker OCR/dictionary failed")
+                return {"worker_process": True, "word": result.original, "meanings": len(result.meanings)}
+            time.sleep(0.02)
+        raise TimeoutError("Worker did not respond within 30 seconds")
+    finally:
+        worker.close()

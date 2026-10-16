@@ -46,6 +46,22 @@ def test_result_treats_angle_brackets_as_literal_and_clamps(app):
     window.close()
 
 
+def test_result_background_stays_readable_with_dark_system_palette(app):
+    from PySide6.QtGui import QPalette
+    original = app.palette()
+    dark = QPalette(original)
+    dark.setColor(QPalette.ColorRole.Base, QColor("#202020"))
+    dark.setColor(QPalette.ColorRole.Window, QColor("#202020"))
+    app.setPalette(dark)
+    window = ResultWindow()
+    window.display("issue · n. 发行", "默认词典顺序", (100, 200, 40, 20), (0, 0, 800, 600))
+    app.processEvents()
+    pixel = window.text.grab().toImage().pixelColor(8, 8)
+    window.close()
+    app.setPalette(original)
+    assert pixel.red() > 220 and pixel.green() > 220 and pixel.blue() > 220
+
+
 def test_editing_shortcuts_suspends_global_keys_and_close_restores(app, tmp_path):
     class Keys:
         def __init__(self): self.bindings = ["F6", "F7", "F8"]

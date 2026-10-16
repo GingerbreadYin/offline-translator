@@ -1,7 +1,6 @@
 """Small Windows desktop shell for the local service pipeline."""
 import ctypes
 from ctypes import wintypes
-from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 import os
 from pathlib import Path
@@ -16,7 +15,7 @@ from PySide6.QtWidgets import (QApplication, QDialog, QFormLayout, QHBoxLayout,
 
 from .core import Navigator, SettingsStore, Workflow, place_result
 from .hotkeys import Hotkeys
-from .services import Pipeline
+from .worker import ProcessWorker
 
 STYLE = """
 QWidget {font-family: 'Microsoft YaHei UI'; font-size: 13px; color: #192b3d;}
@@ -41,10 +40,6 @@ class NativeFilter(QAbstractNativeEventFilter):
                 QTimer.singleShot(0, lambda: self.callback(action))
                 return True, 0
         return False, 0
-
-
-class WorkerSignals(QObject):
-    done = Signal(int, object, str)
 
 
 class SelectionOverlay(QWidget):
@@ -139,8 +134,9 @@ class ResultWindow(QWidget):
         self.text.setWordWrap(True)
         self.text.setTextFormat(Qt.TextFormat.PlainText)
         self.text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.text.setStyleSheet("font-size: 16px; padding: 2px;")
+        self.text.setStyleSheet("font-size: 16px; padding: 2px; background: #f8fafc; border: 0;")
         scroll = QScrollArea()
+        scroll.setStyleSheet("background: #f8fafc; border: 0;")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setWidget(self.text)
@@ -240,11 +236,7 @@ class Controller(QObject):
             QMessageBox.warning(None, "配置错误", str(exc))
             self.settings = {"bindings": ["Ctrl+Alt+Q", "Ctrl+Alt+Up", "Ctrl+Alt+Down"]}
         self.flow = Workflow()
-        self.pipeline = Pipeline(resources)
-        self.pool = ThreadPoolExecutor(max_workers=1)
-        self.pending = None
-        self.signals = WorkerSignals()
-        self.signals.done.connect(self.finished)
+        self.worker = ProcessWorker(config=str(resources))
         self.hotkeys = Hotkeys()
         self.native = NativeFilter(self.action)
         app.installNativeEventFilter(self.native)
@@ -278,7 +270,20 @@ class Controller(QObject):
         self.escape_timer = QTimer(self)
         self.escape_timer.timeout.connect(self.check_escape)
         self.escape_timer.start(60)
+        self.worker_timer = QTimer(self)
+        self.worker_timer.timeout.connect(self.poll_worker)
+        self.worker_timer.start(40)
         self.settings_window.show()
+
+    def poll_worker(self):
+        try:
+            for job, result, error in self.worker.poll():
+                self.finished(job, result, error)
+        except (RuntimeError, OSError) as exc:
+            self.worker_timer.stop()
+            if self.flow.state == "processing":
+                self.finished(self.flow.generation, None, str(exc))
+            self.tray.showMessage("离线引擎错误", str(exc))
 
     def open_settings(self):
         self.settings_window.show()
@@ -304,8 +309,7 @@ class Controller(QObject):
 
     def cancel(self):
         self.flow.cancel()
-        if self.pending:
-            self.pending.cancel()
+        self.worker.cancel_pending()
         self.clear_overlays()
         self.result.hide()
         self.navigator = Navigator([])
@@ -335,20 +339,8 @@ class Controller(QObject):
         self.selection, self.area = selection, area
         job = self.flow.begin()
         self.result.display("正在识别与翻译…", "本机离线处理 · 再按主快捷键取消", selection, area)
-        # Keep at most one running and one queued job. Stale results never reach UI.
-        if self.pending:
-            self.pending.cancel()
-        def work():
-            try:
-                output = self.pipeline.run(image)
-                self.signals.done.emit(job, output, "")
-            except Exception as exc:
-                # Show errors, never write recognized text or images to logs.
-                self.signals.done.emit(job, None, str(exc))
-            finally:
-                image.close()
-        self.pending = self.pool.submit(work)
-        self.pending.add_done_callback(lambda future: image.close() if future.cancelled() else None)
+        self.worker.submit((job, image.size, image.tobytes()))
+        image.close()
 
     def finished(self, job, result, error):
         if not self.flow.finish(job):
@@ -376,6 +368,7 @@ class Controller(QObject):
         self.cancel()
         self.hotkeys.close()
         self.escape_timer.stop()
+        self.worker_timer.stop()
         self.tray.hide()
-        self.pool.shutdown(wait=False, cancel_futures=True)
+        self.worker.close()
         self.app.quit()

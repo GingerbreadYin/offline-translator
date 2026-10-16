@@ -13,10 +13,17 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--ui-smoke", action="store_true")
+    parser.add_argument("--worker-test", action="store_true")
+    parser.add_argument("--report", type=Path)
     args = parser.parse_args()
-    if args.self_test:
-        from tools.probe import probe
-        print(json.dumps(probe(resource_root()), ensure_ascii=False, indent=2))
+    if args.self_test or args.worker_test:
+        from tools.probe import probe, probe_worker
+        data = probe_worker(resource_root()) if args.worker_test else probe(resource_root())
+        report = json.dumps(data, ensure_ascii=False, indent=2)
+        if args.report:
+            args.report.write_text(report, encoding="utf-8")
+        elif sys.stdout is not None:
+            print(report)
         return
     from PySide6.QtCore import QTimer
     from PySide6.QtNetwork import QLocalServer, QLocalSocket
@@ -42,4 +49,6 @@ def main():
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     main()
