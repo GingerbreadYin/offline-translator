@@ -1,0 +1,54 @@
+{
+  "version": "0.1.0",
+  "sources": [
+    {
+      "name": "ecdict.csv",
+      "url": "https://raw.githubusercontent.com/skywind3000/ECDICT/bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b/ecdict.csv",
+      "sha256": "1a6947e04785db63613a92e14903cdae7954f7e84860b10e68e5c7cbb3f9c3cf",
+      "bytes": 65933428
+    },
+    {
+      "name": "en_zh.argosmodel",
+      "url": "https://argos-net.com/v1/translate-en_zh-1_9.argosmodel",
+      "sha256": "433e7c4f034d87fbe2353161e05f18646d7999452f801a4e1f0378522b9850ab",
+      "bytes": 70743021
+    }
+  ],
+  "files": [
+    {
+      "path": "dictionary.db",
+      "sha256": "eff8267f04013f15d0e57b5d00f58c06f9b11c46ebe9a3bc5141d01b0dbb9dbe",
+      "bytes": 66777088
+    },
+    {
+      "path": "translation/metadata.json",
+      "sha256": "106086bc1b77d2d5c298aa38be69e8e87263eeb4167b4614b08a030c43d31b6a",
+      "bytes": 135
+    },
+    {
+      "path": "translation/model/config.json",
+      "sha256": "3a8660f12559a223969532ff191e5e6f50d4ff24164517edbd6a5090dc5144c6",
+      "bytes": 216
+    },
+    {
+      "path": "translation/model/model.bin",
+      "sha256": "1a039114d9456b6528fabb65b455b6f156319634a0f984b1f6018f7737d67598",
+      "bytes": 82713318
+    },
+    {
+      "path": "translation/model/shared_vocabulary.json",
+      "sha256": "c0b6e24705ec0489d5b810de365959c1013aecd644cfeca161b54ea1df6a7dc0",
+      "bytes": 1367577
+    },
+    {
+      "path": "translation/README.md",
+      "sha256": "050e546664f0e70d80b6f83aa1da5f04ee85335f4a1b62d1c89184f76100b5dc",
+      "bytes": 401
+    },
+    {
+      "path": "translation/sentencepiece.model",
+      "sha256": "872224b85a11edc9d769a94949fd387b67ea85b50708db9f91f32f5b497a9af3",
+      "bytes": 806370
+    }
+  ]
+}

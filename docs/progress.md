@@ -9,3 +9,4 @@ Pre-flight: workflow produces request IDs and accepts result IDs; UI uses same I
 Pre-flight: lookup returns structured meanings plus text; UI navigator consumes that shape.
 Pre-flight: resource preparation produces SQLite plus model directory; service adapters consume exact manifest paths.
 Tasks: 1 resources/environment in progress; 2 storage; 3 workflow; 4 services; 5 hotkeys/tray; 6 capture/results; 7 acceptance; 8 package/GitHub.
+Tasks 1-6: implemented; 21 tests passed. Real OCR/dictionary/translation probe passed on synthetic English text. Model attribution confirmed CC-BY 4.0 from packaged README. Resource integrity uses SHA256. Real manga and mixed-DPI desktop acceptance remain unverified.

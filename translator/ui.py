@@ -177,14 +177,14 @@ class SettingsWindow(QDialog):
             self.edits.append(edit)
             form.addRow(label, edit)
         layout.addLayout(form)
-        warning = QLabel("支持单键与组合键；系统保留键或已占用键无法绑定。\n单键可能影响其他软件输入，推荐组合键。Esc 保留为取消。")
+        warning = QLabel("支持单键与组合键；系统保留键或已占用键无法绑定。\n单键可能影响其他软件输入，推荐组合键。Esc 保留为取消。\n设置窗口打开时快捷键暂停；保存或关闭窗口后启用。")
         warning.setStyleSheet("color: #58718a; font-size: 11px; padding: 8px 0;")
         layout.addWidget(warning)
         self.status = QLabel()
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         buttons = QHBoxLayout()
-        save = QPushButton("保存快捷键")
+        save = QPushButton("保存并启用")
         save.clicked.connect(self.save)
         test = QPushButton("开始框选")
         test.clicked.connect(self.start)
@@ -207,12 +207,26 @@ class SettingsWindow(QDialog):
                 raise
             self.owner.settings = settings
             self.status.setText("快捷键已保存并生效。")
+            self.hide()
         except (ValueError, OSError) as exc:
             QMessageBox.warning(self, "无法保存", str(exc))
 
     def start(self):
         self.hide()
         QTimer.singleShot(180, self.owner.toggle)
+
+    def showEvent(self, event):
+        self.owner.hotkeys.close()
+        super().showEvent(event)
+
+    def hideEvent(self, event):
+        try:
+            self.owner.hotkeys.apply(self.owner.settings["bindings"])
+        except ValueError as exc:
+            self.status.setText(str(exc))
+            if hasattr(self.owner, "tray"):
+                self.owner.tray.showMessage("快捷键未启用", str(exc))
+        super().hideEvent(event)
 
 
 class Controller(QObject):
@@ -334,6 +348,7 @@ class Controller(QObject):
             finally:
                 image.close()
         self.pending = self.pool.submit(work)
+        self.pending.add_done_callback(lambda future: image.close() if future.cancelled() else None)
 
     def finished(self, job, result, error):
         if not self.flow.finish(job):

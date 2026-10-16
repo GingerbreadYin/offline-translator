@@ -1,5 +1,6 @@
 """Local-only service adapters. No network access at runtime."""
 from pathlib import Path
+from contextlib import closing
 import re
 import sqlite3
 import threading
@@ -12,7 +13,7 @@ class Dictionary:
 
     def find(self, word):
         word = word.lower().strip()
-        with sqlite3.connect(f"file:{self.path.as_posix()}?mode=ro", uri=True) as db:
+        with closing(sqlite3.connect(f"file:{self.path.as_posix()}?mode=ro", uri=True)) as db:
             row = db.execute("SELECT translation FROM words WHERE word=?", (word,)).fetchone()
             if not row:
                 row = db.execute("SELECT w.translation FROM forms f JOIN words w ON w.word=f.lemma WHERE f.form=? LIMIT 1", (word,)).fetchone()
@@ -59,7 +60,7 @@ class OfflineTranslator:
             sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", chunk) if s.strip()]
             tokens = [self.tokenizer.encode(s, out_type=str) for s in sentences]
             translated = self.engine.translate_batch(tokens, beam_size=4, max_decoding_length=512, replace_unknowns=True, length_penalty=0.2)
-            outputs.append(" ".join(self.tokenizer.decode(r.hypotheses[0]) for r in translated))
+            outputs.append(" ".join(self.tokenizer.decode(r.hypotheses[0]).replace("▁", " ").strip() for r in translated))
         return "".join(outputs).strip()
 
 
@@ -69,6 +70,7 @@ class Pipeline:
         self.lookup = Lookup(Dictionary(self.root / "dictionary.db"), OfflineTranslator(self.root / "translation"))
         self.ocr = None
         self.lock = threading.Lock()
+        self.verified = False
 
     def recognize(self, image):
         if self.ocr is None:
@@ -83,4 +85,10 @@ class Pipeline:
 
     def run(self, image):
         with self.lock:
+            if not self.verified:
+                from .resources import verify_resources
+                invalid = verify_resources(self.root)
+                if invalid:
+                    raise ValueError("离线资源缺失或损坏，请重新解压完整发行包：" + ", ".join(invalid[:3]))
+                self.verified = True
             return self.lookup.lookup(self.recognize(image))
