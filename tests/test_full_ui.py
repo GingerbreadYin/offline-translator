@@ -60,10 +60,13 @@ def test_panel_never_saves_occluded_inline_translation(app):
             TranslatedParagraph((20,10,240,25),Result('Panel entry.',translation='旁栏条目。'))]
     overlay.display(data,[p.rect for p in data],(0,0,1200,900),(0,0,1200,900),(1200,900))
     app.processEvents()
-    result = overlay.hovered(QPoint(1019,75))
-    assert result is None or result.original == 'Panel entry.'
     label,_ = overlay.labels[0]
     assert overlay.panel.isAncestorOf(label), 'covered inline text must remain available in panel'
+    # Font metrics differ between the native desktop and offscreen CI. Use the
+    # relocated visible item, rather than a coordinate that can hit either row.
+    result = overlay.hovered(label.mapToGlobal(label.rect().center()))
+    assert result.original == 'Hidden inline.'
+    assert overlay.hovered(overlay.panel.mapToGlobal(QPoint(310,570))) is None
     overlay.close()
 
 
