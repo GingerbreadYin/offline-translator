@@ -62,14 +62,16 @@ def probe_window(resources):
         while time.monotonic()<deadline:
             app.processEvents()
             if condition(): return
-            state = (owner.full.active,owner.full.focused,fixture.isVisible(),fixture.isMinimized(),int(fixture.winId()),foreground_window(),owner.full.epoch)
+            state = (owner.full.active,fixture.isVisible(),fixture.isMinimized(),int(fixture.winId()),foreground_window(),owner.full.epoch)
             if not states or state != states[-1]: states.append(state)
             time.sleep(.02)
         raise TimeoutError(f'Window probe timed out: states={states[-15:]}, messages={messages}')
     try:
         wait_for(lambda: foreground_window()==hwnd,5)
+        from PySide6.QtTest import QTest
+        QTest.qWait(250)
         owner.full.start(hwnd)
-        wait_for(lambda: owner.full.overlay.layer.isVisible())
+        wait_for(lambda: any(label.isVisible() for label,_ in owner.full.overlay.labels))
         index = next(i for i,p in enumerate(owner.full.overlay.paragraphs) if 'This project' in p.result.original)
         first = owner.full.overlay.paragraphs[index].result
         assert '项目' in first.translation,first
@@ -79,15 +81,29 @@ def probe_window(resources):
         assert any(r['original']==first.original for r in owner.favorites.list())
         epoch = owner.full.epoch
         fixture.setText('Please open the settings window.')
-        wait_for(lambda: owner.full.epoch > epoch)
-        assert not owner.full.overlay.layer.isVisible()
-        wait_for(lambda: owner.full.overlay.layer.isVisible())
-        second = next(p.result for p in owner.full.overlay.paragraphs if 'Please open' in p.result.original)
-        assert '设置' in second.translation and '窗口' in second.translation,second
+        app.processEvents()
+        deadline=time.monotonic()+.8
+        while time.monotonic()<deadline:
+            app.processEvents();time.sleep(.02)
+        assert owner.full.epoch==epoch
+        assert any(label.isVisible() for label,_ in owner.full.overlay.labels)
+        assert owner.full.overlay.paragraphs[index].result.original==first.original
+        # Exercise the actual native WM_HOTKEY path without needing physical
+        # keyboard input. Explicit HWND chooses this same-process fixture only.
+        original_start=owner.full.start
+        owner.full.start=lambda: original_start(hwnd)
+        for iteration in range(4):
+            user32.PostThreadMessageW(current_thread,0x312,104,0)
+            wait_for(lambda: not owner.full.active,3)
+            user32.PostThreadMessageW(current_thread,0x312,104,0)
+            wait_for(lambda: owner.full.active,3)
+        wait_for(lambda: any(label.isVisible() for label,_ in owner.full.overlay.labels))
+        second=next(p.result for p in owner.full.overlay.paragraphs if 'Please open' in p.result.original)
+        assert '设置' in second.translation and '窗口' in second.translation
         owner.action(3)
-        assert not owner.full.active and not owner.full.overlay.layer.isVisible()
+        assert not owner.full.active and not any(label.isVisible() for label,_ in owner.full.overlay.labels)
         assert set(owner.hotkeys.registered)=={103}
-        return {'window_translation':True,'changed_content_refreshed':True,
+        return {'window_translation':True,'snapshot_persists_on_change':True,'native_shortcut_cycles':4,
                 'hover_favorite':True,'pause_hides_overlay':True,
                 'first':first.translation,'second':second.translation,
                 'scope':'controlled real Qt window, not user browser/manga'}

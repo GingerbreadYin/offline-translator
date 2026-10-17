@@ -1,8 +1,6 @@
-"""Pure paragraph, layout and refresh policies for visible-window translation."""
+"""Pure paragraph and layout policies for visible-window translation."""
 from dataclasses import dataclass
-from hashlib import blake2b
 import re
-from PIL import ImageChops
 from .core import Result
 
 
@@ -79,44 +77,3 @@ def place_translations(originals, sizes, area, obstacles=None):
         else:
             placements.append(None)
     return placements
-
-
-class RefreshGate:
-    def __init__(self, stable_seconds=.65):
-        self.stable_seconds = stable_seconds
-        self.signature = None
-        self.changed_at = 0
-        self.submitted = False
-        self.previous = None
-        self.recent = []
-        self.last_pixel_change = 0
-
-    def reset(self):
-        self.signature = None
-        self.submitted = False
-        self.previous = None
-        self.recent = []
-
-    def observe(self, image, focused, now):
-        if not focused:
-            self.reset()
-            return 'hidden'
-        signature = (image.size, blake2b(image.tobytes(), digest_size=16).digest())
-        if signature != self.signature:
-            box = ImageChops.difference(image,self.previous).getbbox() if self.previous is not None and self.previous.size == image.size else None
-            # Recognize a recurring, localized vertical caret blink. A first
-            # change (even one pixel) still invalidates; new text never relies
-            # on a downscaled hash which could silently miss a changed word.
-            caret = (box is not None and box[2]-box[0] <= 4 and box[3]-box[1] <= 80
-                     and signature in self.recent and now-self.last_pixel_change <= 1.2)
-            self.last_pixel_change = now
-            self.signature = signature
-            self.previous = image.copy()
-            self.recent = (self.recent+[signature])[-8:]
-            if not caret:
-                self.changed_at, self.submitted = now, False
-                return 'changed'
-        if not self.submitted and now-self.changed_at >= self.stable_seconds:
-            self.submitted = True
-            return 'ready'
-        return 'unchanged' if self.submitted else 'waiting'

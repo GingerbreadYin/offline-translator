@@ -58,31 +58,6 @@ def test_layout_never_places_translation_over_other_original_text():
     assert placements[1] is None
 
 
-def test_refresh_invalidates_on_change_focus_and_waits_for_stability():
-    from translator.fullpage import RefreshGate
-    gate = RefreshGate(stable_seconds=.5)
-    a = Image.new('RGB', (100,100), 'white')
-    b = Image.new('RGB', (100,100), 'black')
-    assert gate.observe(a, True, 0) == 'changed'
-    assert gate.observe(a, True, .2) == 'waiting'
-    assert gate.observe(a, True, .6) == 'ready'
-    assert gate.observe(a, True, .8) == 'unchanged'
-    assert gate.observe(b, True, .9) == 'changed'
-    assert gate.observe(b, False, 1.5) == 'hidden'
-    assert gate.observe(b, True, 1.6) == 'changed'
-    assert gate.observe(b, True, 2.2) == 'ready'
-
-
-def test_small_text_change_is_not_lost_by_thumbnail_hash():
-    from translator.fullpage import RefreshGate
-    gate = RefreshGate(.1)
-    image = Image.new('RGB', (1200,800), 'white')
-    gate.observe(image, True, 0)
-    assert gate.observe(image, True, .2) == 'ready'
-    image.putpixel((601,401), (0,0,0))
-    assert gate.observe(image, True, .3) == 'changed'
-
-
 def test_full_translation_caches_text_but_keeps_new_coordinates():
     from translator.fullpage import Paragraph
     from translator.services import Pipeline
@@ -103,22 +78,6 @@ def test_full_translation_caches_text_but_keeps_new_coordinates():
     assert calls == ['This is a test.']
     assert a[0].rect == (20,30,200,20) and b[0].rect == (20,80,200,20)
     assert b[0].result.translation == '这是一个测试。'
-
-
-def test_blinking_caret_does_not_starve_stable_paragraphs():
-    from translator.fullpage import RefreshGate
-    from PIL import ImageDraw
-    a = Image.new('RGB',(800,500),'white')
-    b = a.copy()
-    ImageDraw.Draw(b).rectangle((30,30,31,55),fill='black')
-    gate = RefreshGate(.65)
-    events = [gate.observe(a,True,0),gate.observe(b,True,.45),
-              gate.observe(a,True,.9),gate.observe(a,True,1.15),gate.observe(b,True,1.35)]
-    assert 'ready' in events
-    assert events[-1] == 'unchanged'
-    for tick in range(4,15):
-        image = a if tick%2 == 0 else b
-        assert gate.observe(image,True,tick*.45) == 'unchanged'
 
 
 def test_cancelled_full_job_does_not_translate_remaining_paragraphs():

@@ -11,7 +11,7 @@ def probe_capture():
     preload_system_icu()
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication, QLabel
-    from windows_capture import WindowsCapture
+    from translator.capture import capture_window_snapshot
     app = QApplication.instance() or QApplication([])
     label = QLabel('Offline Translator capture fixture\nThis project is open source.')
     label.setStyleSheet('background: white; color: black; font-size: 28px; padding: 30px;')
@@ -23,25 +23,16 @@ def probe_capture():
     show.argtypes = [wintypes.HWND,ctypes.c_int]
     show(int(label.winId()),5)
     app.processEvents()
-    frames = []
-    capture = WindowsCapture(window_hwnd=int(label.winId()), cursor_capture=False, draw_border=False)
-    @capture.event
-    def on_frame_arrived(frame, control):
-        frames.append((frame.width, frame.height))
-    @capture.event
-    def on_closed():
-        pass
-    control = capture.start_free_threaded()
-    started = time.monotonic()
+    from PySide6.QtTest import QTest
+    QTest.qWait(150)
     try:
-        while not frames and time.monotonic() - started < 10:
-            app.processEvents()
-            time.sleep(.02)
-        if not frames:
-            raise RuntimeError('Windows Capture returned no frames')
-        return {'component': 'windows-capture 2.0.1', 'window_capture': True, 'size': frames[-1]}
+        image,target,area=capture_window_snapshot(int(label.winId()),app)
+        try:
+            assert image.width>500 and image.height>100
+            return {'component':'Qt single screenshot','window_capture':True,'size':image.size}
+        finally:
+            image.close()
     finally:
-        control.stop()
         label.close()
         app.processEvents()
 

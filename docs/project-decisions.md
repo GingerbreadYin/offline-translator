@@ -1,5 +1,7 @@
 # User-approved project decisions
 
+- 2026-10-17 v0.1.3 supersedes the v0.1.2 live-window design: full translation captures once, never follows page/focus changes, and remains until explicitly dismissed. Region results, inline full-result cards and the fallback list are movable by their headers. Remove live capture/refresh rather than retaining an optional live mode. Add a favorites entry in settings. Continue publishing each completed version per existing authorization.
+
 - 2026-10-17: This release is v0.1.2. After local implementation, verification and packaging, upload source and complete release assets to the existing private GitHub repository. The user also authorizes uploading each subsequent completed version iteration, unless they later change this preference.
 - Default full-window shortcut: Ctrl+Shift+A. Favorite shortcut: Ctrl+Shift+S. User explicitly retained these after discussion of browser shortcut conflicts. Both remain editable.
 - Full-window means visible content of the active window, with automatic stable-frame refresh. It does not mean the offscreen parts of an entire webpage.

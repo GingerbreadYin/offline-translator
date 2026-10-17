@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 from PIL import Image
-from PySide6.QtCore import (QAbstractNativeEventFilter, QObject, QPoint, QRect, Qt,
+from PySide6.QtCore import (QAbstractNativeEventFilter, QEvent, QObject, QPoint, QRect, Qt,
                             QTimer, Signal)
 from PySide6.QtGui import QColor, QCursor, QIcon, QKeySequence, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QApplication, QDialog, QFormLayout, QHBoxLayout,
@@ -18,7 +18,7 @@ from . import __version__
 from .hotkeys import Hotkeys
 from .worker import ProcessWorker
 from .favorites import FavoritesStore
-from .full_ui import FavoritesWindow, result_text
+from .full_ui import FavoritesWindow, result_text, DragHandle
 from .window_translation import WindowTranslation
 
 STYLE = """
@@ -129,7 +129,7 @@ class ResultWindow(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 10, 16, 12)
         header = QHBoxLayout()
-        self.caption = QLabel("离线翻译")
+        self.caption = DragHandle("离线翻译 · 拖动此处移动", self)
         self.caption.setStyleSheet("color: #58718a; font-size: 11px;")
         close = QPushButton("×")
         close.setFixedSize(28, 26)
@@ -164,6 +164,7 @@ class SettingsWindow(QDialog):
     def __init__(self, owner):
         super().__init__()
         self.owner = owner
+        self.editing = False
         self.setWindowTitle("离线翻译 · 设置")
         self.setMinimumWidth(490)
         self.setStyleSheet(STYLE)
@@ -182,7 +183,7 @@ class SettingsWindow(QDialog):
             self.edits.append(edit)
             form.addRow(label, edit)
         layout.addLayout(form)
-        warning = QLabel("支持单键与组合键；系统保留键或已占用键无法绑定。\n单键可能影响其他软件输入，推荐组合键。Esc 保留为取消。\n设置窗口打开时快捷键暂停；保存或关闭窗口后启用。")
+        warning = QLabel("支持单键与组合键；系统保留键或已占用键无法绑定。\n单键可能影响其他软件输入，推荐组合键。Esc 保留为取消。\n编辑快捷键时暂停，切换到其他窗口后自动恢复。")
         warning.setStyleSheet("color: #58718a; font-size: 11px; padding: 8px 0;")
         layout.addWidget(warning)
         self.status = QLabel()
@@ -195,6 +196,9 @@ class SettingsWindow(QDialog):
         self.start_button.clicked.connect(self.start)
         buttons.addWidget(save)
         buttons.addWidget(self.start_button)
+        self.favorites_button = QPushButton("收藏列表")
+        self.favorites_button.clicked.connect(lambda: self.owner.open_favorites())
+        buttons.addWidget(self.favorites_button)
         layout.addLayout(buttons)
         resources_ok = (owner.resources / "dictionary.db").exists() and (owner.resources / "translation/model/model.bin").exists()
         self.status.setText("资源已准备，日常使用无需联网。软件关闭窗口后继续常驻托盘。" if resources_ok else "资源缺失，请运行资源准备脚本或使用完整发行包。")
@@ -221,17 +225,39 @@ class SettingsWindow(QDialog):
         QTimer.singleShot(180, self.owner.toggle)
 
     def showEvent(self, event):
-        if hasattr(self.owner, 'full') and self.owner.full.active:
-            self.owner.cancel()
+        if self.isMinimized():
+            self.editing=False
+            self.restore_shortcuts()
+            super().showEvent(event)
+            return
+        self.editing = True
         if hasattr(self.owner, "invalidate_shortcuts"):
             self.owner.invalidate_shortcuts()
         self.owner.hotkeys.close()
         super().showEvent(event)
 
     def hideEvent(self, event):
+        self.editing = False
         if getattr(self.owner, "shutting_down", False):
             super().hideEvent(event)
             return
+        self.restore_shortcuts()
+        super().hideEvent(event)
+
+    def event(self,event):
+        if hasattr(self,'owner') and hasattr(self.owner,'settings_window') and not getattr(self.owner,'shutting_down',False):
+            if event.type()==QEvent.Type.WindowActivate and self.isVisible() and not self.isMinimized():
+                self.editing=True
+                if hasattr(self.owner,'invalidate_shortcuts'): self.owner.invalidate_shortcuts()
+                self.owner.hotkeys.close()
+            elif event.type()==QEvent.Type.WindowDeactivate:
+                self.editing=False
+                self.restore_shortcuts()
+            elif event.type()==QEvent.Type.WindowStateChange and self.isMinimized():
+                self.hide()
+        return super().event(event)
+
+    def restore_shortcuts(self):
         if hasattr(self.owner, "invalidate_shortcuts"):
             self.owner.invalidate_shortcuts()
         try:
@@ -249,7 +275,6 @@ class SettingsWindow(QDialog):
             self.status.setText(message)
             if hasattr(self.owner, "tray"):
                 self.owner.tray.showMessage("快捷键未启用", message)
-        super().hideEvent(event)
 
 
 class Controller(QObject):
@@ -334,7 +359,7 @@ class Controller(QObject):
             return
         requested = not self.enabled
         try:
-            if not self.settings_window.isVisible():
+            if not self.settings_window.editing:
                 self.hotkeys.apply(self.settings["bindings"], enabled=requested)
         except ValueError as exc:
             self.enable_action.setChecked(self.enabled)
@@ -357,8 +382,14 @@ class Controller(QObject):
                 self.finished(self.flow.generation, None, str(exc))
             self.tray.showMessage("离线引擎错误", str(exc))
 
+    def ensure_worker(self):
+        if not getattr(self.worker,'alive',True) or not self.worker_timer.isActive():
+            self.worker.close()
+            self.worker=ProcessWorker(config=str(self.resources))
+            self.worker_timer.start(40)
+
     def open_settings(self):
-        self.settings_window.show()
+        self.settings_window.showNormal()
         self.settings_window.raise_()
         self.settings_window.activateWindow()
 
@@ -402,6 +433,7 @@ class Controller(QObject):
     def toggle(self):
         if self.shutting_down or not self.enabled:
             return
+        self.ensure_worker()
         if self.full.active:
             self.cancel()
         if self.flow.state != "idle":
@@ -459,13 +491,13 @@ class Controller(QObject):
     def toggle_full(self):
         if self.shutting_down or not self.enabled:
             return
+        self.ensure_worker()
         self.full.start()
 
     def save_favorite(self):
         if self.shutting_down or not self.enabled:
             return
         if self.full.active:
-            self.full.tick()
             result = self.full.overlay.hovered(QCursor.pos())
             text = result_text(result) if result else ''
         else:
@@ -484,7 +516,7 @@ class Controller(QObject):
             self.tray.showMessage('收藏失败',str(exc))
 
     def open_favorites(self):
-        self.cancel()
+        self.settings_window.hide()
         self.favorites_window.show()
         self.favorites_window.raise_()
         self.favorites_window.activateWindow()

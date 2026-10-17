@@ -47,12 +47,7 @@ class OfflineTranslator:
         self.engine = None
 
     def translate(self, text):
-        if self.engine is None:
-            import ctranslate2
-            import sentencepiece
-            tokenizer = sentencepiece.SentencePieceProcessor(model_proto=(self.root / "sentencepiece.model").read_bytes())
-            engine = ctranslate2.Translator(str(self.root / "model"), device="cpu", compute_type="int8", inter_threads=1, intra_threads=4)
-            self.tokenizer, self.engine = tokenizer, engine
+        self.prepare()
         # Preserve explicit links and code spans without sending them through translation.
         chunks = re.split(r"(https?://[^\s]+|`[^`]+`)", text)
         outputs = []
@@ -66,6 +61,14 @@ class OfflineTranslator:
             outputs.append(" ".join(self.tokenizer.decode(r.hypotheses[0]).replace("▁", " ").strip() for r in translated))
         return "".join(outputs).strip()
 
+    def prepare(self):
+        if self.engine is None:
+            import ctranslate2
+            import sentencepiece
+            tokenizer = sentencepiece.SentencePieceProcessor(model_proto=(self.root / "sentencepiece.model").read_bytes())
+            engine = ctranslate2.Translator(str(self.root / "model"), device="cpu", compute_type="int8", inter_threads=1, intra_threads=4)
+            self.tokenizer, self.engine = tokenizer, engine
+
 
 class Pipeline:
     def __init__(self, resource_root):
@@ -75,6 +78,19 @@ class Pipeline:
         self.lock = threading.Lock()
         self.verified = False
         self.cache = OrderedDict()
+
+    def warmup(self):
+        """Load and exercise engines in the child process before declaring ready."""
+        from PIL import Image,ImageDraw,ImageFont
+        from .resources import verify_resources
+        invalid=verify_resources(self.root)
+        if invalid:
+            raise ValueError('离线资源缺失或损坏：'+', '.join(invalid[:3]))
+        self.verified=True
+        with Image.new('RGB',(320,100),'white') as sample:
+            ImageDraw.Draw(sample).text((20,25),'Hello world.',fill='black',font=ImageFont.load_default(size=32))
+            self.recognize_lines(sample)
+        self.lookup.translator.translate('Hello.')
 
     def recognize(self, image):
         result = self.recognize_lines(image)
@@ -91,7 +107,7 @@ class Pipeline:
         result, _ = self.ocr(data)
         return result or []
 
-    def translate_paragraphs(self, paragraphs, cancelled=None):
+    def translate_paragraphs(self, paragraphs, cancelled=None, on_progress=None):
         translated = []
         for paragraph in paragraphs:
             if cancelled and cancelled():
@@ -103,9 +119,11 @@ class Pipeline:
                     self.cache.popitem(last=False)
             self.cache.move_to_end(text)
             translated.append(TranslatedParagraph(paragraph.rect, self.cache[text]))
+            if on_progress and (len(translated)==1 or len(translated)%4==0):
+                on_progress(translated[:])
         return translated
 
-    def run(self, image, full=False, cancelled=None):
+    def run(self, image, full=False, cancelled=None, on_progress=None):
         with self.lock:
             if not self.verified:
                 from .resources import verify_resources
@@ -115,6 +133,10 @@ class Pipeline:
                 self.verified = True
             if full:
                 lines = self.recognize_lines(image)
-                return {'paragraphs': self.translate_paragraphs(group_lines(lines),cancelled),
-                        'obstacles': [bounds(item[0]) for item in lines]}
+                obstacles=[bounds(item[0]) for item in lines]
+                def progress(items):
+                    if on_progress:
+                        on_progress({'paragraphs':items,'obstacles':obstacles,'complete':False})
+                return {'paragraphs': self.translate_paragraphs(group_lines(lines),cancelled,progress),
+                        'obstacles': obstacles,'complete':True}
             return self.lookup.lookup(self.recognize(image))

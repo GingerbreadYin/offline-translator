@@ -223,47 +223,12 @@ def test_region_favorite_saves_all_text_and_current_meaning(controller):
     assert len(owner.favorites.list()) == 1
 
 
-def test_full_refresh_hides_old_results_and_rejects_stale_job(controller, monkeypatch):
-    import translator.window_translation as module
-    from PIL import Image
-    from translator.core import Result
-    from translator.fullpage import TranslatedParagraph
-    owner, _ = controller
-    full = owner.full
-    monkeypatch.setattr(module,'foreground_window',lambda: 1234)
-    monkeypatch.setattr(module,'window_geometry',lambda h,a: ((100,0,700,500),(0,0,1200,900)))
-    image = Image.new('RGB',(700,500),'white')
-    full.capture.closed = False
-    monkeypatch.setattr(full.capture,'snapshot',lambda: image.copy())
-    full.hwnd = 1234
-    full.geometry = ((100,0,700,500),(0,0,1200,900))
-    full.tick()
-    full.gate.changed_at -= 1
-    requests = []
-    owner.worker.submit = requests.append
-    full.tick()
-    job = requests[-1][0]
-    data = {'paragraphs':[TranslatedParagraph((20,100,240,25),Result('This is a test.',translation='这是测试。'))],
-            'obstacles':[(20,100,240,25)]}
-    full.finished(job,data,'')
-    assert full.overlay.layer.isVisible()
-    image.putpixel((0,0),(0,0,0))
-    # A frame can change after the last timer tick but before inference returns.
-    full.finished(job,data,'')
-    assert not full.overlay.layer.isVisible()
-    full.finished(job,data,'')
-    assert not full.overlay.layer.isVisible()
-    owner.action(3)
-    assert not full.active and not full.timer.isActive()
-
-
 def test_full_favorite_saves_only_hovered_translation(controller, monkeypatch):
     from translator.core import Result
     from translator.fullpage import TranslatedParagraph
     from PySide6.QtGui import QCursor
     owner,_ = controller
     full = owner.full
-    monkeypatch.setattr(full,'tick',lambda: None)
     full.hwnd = 1234
     data = [TranslatedParagraph((20,100,240,25),Result('First sentence.',translation='第一句。')),
             TranslatedParagraph((20,200,240,25),Result('Second sentence.',translation='第二句。'))]
@@ -272,3 +237,50 @@ def test_full_favorite_saves_only_hovered_translation(controller, monkeypatch):
     monkeypatch.setattr(QCursor,'pos',lambda: label.mapToGlobal(label.rect().center()))
     owner.action(5)
     assert [r['original'] for r in owner.favorites.list()] == ['Second sentence.']
+
+
+def test_settings_favorites_entry_opens_list_and_restores_keys(controller,app):
+    owner,backend=controller
+    owner.settings_window.show();app.processEvents()
+    assert not backend.active
+    owner.settings_window.favorites_button.click();app.processEvents()
+    assert owner.favorites_window.isVisible()
+    assert not owner.settings_window.isVisible()
+    assert set(backend.active)=={100,101,102,103,104,105}
+
+
+def test_region_result_header_drag_changes_window_position(controller,app):
+    owner,_=controller
+    owner.result.display('完整译文','拖动移动',(100,200,40,20),(0,0,1200,900))
+    before=owner.result.pos()
+    QTest.mousePress(owner.result.caption,Qt.MouseButton.LeftButton,pos=QPoint(10,10))
+    QTest.mouseMove(owner.result.caption,QPoint(75,40))
+    QTest.mouseRelease(owner.result.caption,Qt.MouseButton.LeftButton,pos=QPoint(75,40))
+    assert owner.result.pos()!=before
+
+
+def test_dead_engine_recovers_on_next_shortcut_without_tray(controller,monkeypatch):
+    owner,_=controller
+    owner.worker_timer.stop()
+    owner.worker.alive=False
+    owner.ensure_worker()
+    assert owner.worker_timer.isActive()
+
+
+def test_switching_away_from_settings_restores_shortcuts_without_tray(controller,app):
+    from PySide6.QtCore import QEvent
+    owner,backend=controller
+    owner.settings_window.show();app.processEvents()
+    app.sendEvent(owner.settings_window,QEvent(QEvent.Type.WindowActivate))
+    assert not backend.active
+    app.sendEvent(owner.settings_window,QEvent(QEvent.Type.WindowDeactivate))
+    assert set(backend.active)=={100,101,102,103,104,105}
+    owner.action(3)
+    assert not owner.enabled and set(backend.active)=={103}
+
+
+def test_minimized_settings_does_not_leave_all_shortcuts_disabled(controller,app):
+    owner,backend=controller
+    owner.settings_window.show();app.processEvents()
+    owner.settings_window.showMinimized();app.processEvents()
+    assert set(backend.active)=={100,101,102,103,104,105}

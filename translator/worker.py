@@ -7,6 +7,7 @@ def inference_loop(connection, resources):
     from .services import Pipeline
     resources, cancel_version = resources
     pipeline = Pipeline(resources)
+    pipeline.warmup()
     connection.send(None)
     while True:
         try:
@@ -19,7 +20,8 @@ def inference_loop(connection, resources):
             if cancel_version.value != version:
                 raise InterruptedError('翻译已取消')
             connection.send((job, pipeline.run(image, full=isinstance(job, tuple) and job[0] == 'full',
-                                               cancelled=lambda: cancel_version.value != version), ""))
+                                               cancelled=lambda: cancel_version.value != version,
+                                               on_progress=lambda data: connection.send((job,data,''))), ""))
         except Exception as exc:
             connection.send((job, None, str(exc)))
         finally:
@@ -64,7 +66,8 @@ class ProcessWorker:
                 result = self.connection.recv()
             except (EOFError, OSError):
                 raise RuntimeError("离线引擎意外退出，请重启软件")
-            self.busy = False
+            if result is None or not (isinstance(result[1],dict) and result[1].get('complete') is False):
+                self.busy = False
             if result is not None:
                 results.append(result)
         if not self.process.is_alive():

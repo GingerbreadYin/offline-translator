@@ -46,13 +46,6 @@ def test_favorites_dialog_displays_literal_text_and_deletes_selected(app, tmp_pa
     dialog.close()
 
 
-def test_capture_adapter_targets_exact_hwnd_and_retains_latest_frame_only():
-    from translator.capture import WindowCapture
-    capture = WindowCapture()
-    assert capture.snapshot() is None
-    capture.close()
-
-
 def test_panel_never_saves_occluded_inline_translation(app):
     from translator.full_ui import FullOverlay
     overlay = FullOverlay()

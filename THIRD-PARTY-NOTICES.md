@@ -12,7 +12,6 @@ This application reuses the following projects. No ownership of their code, data
 | SentencePiece | https://github.com/google/sentencepiece | Apache-2.0 |
 | PySide6 / Qt | https://www.qt.io/qt-for-python | LGPLv3 / GPLv3 / commercial options; dynamically loaded libraries are distributed in the portable folder. Qt licensing information: https://www.qt.io/licensing/open-source-lgpl-obligations ; source: https://code.qt.io/ and https://download.qt.io/official_releases/ |
 | ONNX Runtime | https://github.com/microsoft/onnxruntime | MIT |
-| Windows Capture Python 2.0.1 | https://github.com/NiiightmareXD/windows-capture | MIT; exact-window capture via Windows Graphics Capture, distributed native extension and license |
 | Python | https://www.python.org/ | Python Software Foundation License |
 | PyInstaller | https://github.com/pyinstaller/pyinstaller | GPL with bootloader distribution exception; build tool |
 
@@ -20,6 +19,6 @@ The portable distribution includes `licenses/` with the installed distributions'
 
 ECDICT is an aggregated dictionary dataset. Its repository license is retained; original source provenance described by that repository should be reviewed before broader public redistribution.
 
-Translumo, WinLens, Immersive Translate and AI-Screenshot-Translator were studied as design references. No source code from those projects is included. ImageHash and DXcam were evaluated as candidates but are not dependencies: exact pixel digests use Python's standard library and capture uses Windows Capture.
+Translumo, WinLens, Immersive Translate and AI-Screenshot-Translator were studied as design references. No source code from those projects is included. ImageHash and DXcam are not dependencies. v0.1.3 removes Windows Capture and live image hashing; single screenshots use Qt, which was already bundled.
 
 License information for transitive components is preserved in `licenses/`. This repository contains our integration code and tests; large third-party resource binaries are excluded from Git and distributed in the private release package for this personal-use first version.

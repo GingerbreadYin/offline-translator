@@ -1,8 +1,6 @@
-"""Exact-HWND Windows Graphics Capture with one bounded latest-frame slot."""
+"""Native window geometry and one-shot visible-pixel capture through Qt."""
 import ctypes
 from ctypes import wintypes
-from threading import Lock
-from PIL import Image
 
 user32 = ctypes.windll.user32
 user32.GetForegroundWindow.restype = wintypes.HWND
@@ -43,45 +41,21 @@ def window_geometry(hwnd, app):
     return target, (area.x(),area.y(),area.width(),area.height())
 
 
-class WindowCapture:
-    def __init__(self):
-        self.lock = Lock()
-        self.latest = None
-        self.control = None
-        self.capture = None
-        self.closed = True
-
-    def start(self, hwnd):
-        from windows_capture import WindowsCapture
-        self.close()
-        self.closed = False
-        self.capture = WindowsCapture(window_hwnd=hwnd, cursor_capture=False,
-                                      draw_border=False, minimum_update_interval=150)
-        @self.capture.event
-        def on_frame_arrived(frame, control):
-            # Native frame lifetime ends after this callback; always own the copy.
-            pixels = frame.frame_buffer[:, :, :3][:, :, ::-1].copy()
-            with self.lock:
-                if not self.closed:
-                    self.latest = pixels
-        @self.capture.event
-        def on_closed():
-            with self.lock:
-                self.closed = True
-                self.latest = None
-        self.control = self.capture.start_free_threaded()
-
-    def snapshot(self):
-        with self.lock:
-            if self.latest is None or self.closed:
-                return None
-            return Image.fromarray(self.latest.copy())
-
-    def close(self):
-        with self.lock:
-            self.closed = True
-            self.latest = None
-        control, self.control = self.control, None
-        if control is not None:
-            control.stop()
-        self.capture = None
+def capture_window_snapshot(hwnd, app):
+    """Capture visible pixels once with Qt; no native capture thread or polling."""
+    from io import BytesIO
+    from PIL import Image
+    from PySide6.QtCore import QRect, QBuffer, QIODevice
+    target,area=window_geometry(hwnd,app)
+    screen=next((s for s in app.screens() if (s.availableGeometry().x(),s.availableGeometry().y(),s.availableGeometry().width(),s.availableGeometry().height())==area),app.primaryScreen())
+    clipped=QRect(*target).intersected(screen.geometry())
+    if clipped.isEmpty(): raise ValueError('目标窗口不在可见屏幕内')
+    pix=screen.grabWindow(0)
+    ratio=pix.devicePixelRatio()
+    geo=screen.geometry()
+    pixels=QRect(round((clipped.x()-geo.x())*ratio),round((clipped.y()-geo.y())*ratio),round(clipped.width()*ratio),round(clipped.height()*ratio))
+    cropped=pix.copy(pixels)
+    buffer=QBuffer(); buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    if not cropped.save(buffer,'PNG'): raise RuntimeError('无法读取窗口截图')
+    image=Image.open(BytesIO(bytes(buffer.data()))).convert('RGB')
+    return image,(clipped.x(),clipped.y(),clipped.width(),clipped.height()),area
