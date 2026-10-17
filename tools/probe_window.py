@@ -71,7 +71,7 @@ def probe_window(resources):
         from PySide6.QtTest import QTest
         QTest.qWait(250)
         owner.full.start(hwnd)
-        wait_for(lambda: any(label.isVisible() for label,_ in owner.full.overlay.labels))
+        wait_for(lambda: not owner.full.waiting and any(label.isVisible() for label,_ in owner.full.overlay.labels))
         index = next(i for i,p in enumerate(owner.full.overlay.paragraphs) if 'This project' in p.result.original)
         first = owner.full.overlay.paragraphs[index].result
         assert '项目' in first.translation,first
@@ -97,7 +97,7 @@ def probe_window(resources):
             wait_for(lambda: not owner.full.active,3)
             user32.PostThreadMessageW(current_thread,0x312,104,0)
             wait_for(lambda: owner.full.active,3)
-        wait_for(lambda: any(label.isVisible() for label,_ in owner.full.overlay.labels))
+        wait_for(lambda: not owner.full.waiting and any(label.isVisible() for label,_ in owner.full.overlay.labels))
         second=next(p.result for p in owner.full.overlay.paragraphs if 'Please open' in p.result.original)
         assert '设置' in second.translation and '窗口' in second.translation
         owner.action(3)

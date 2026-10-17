@@ -197,7 +197,7 @@ class SettingsWindow(QDialog):
         buttons.addWidget(save)
         buttons.addWidget(self.start_button)
         self.favorites_button = QPushButton("收藏列表")
-        self.favorites_button.clicked.connect(lambda: self.owner.open_favorites())
+        self.favorites_button.clicked.connect(self.open_favorites)
         buttons.addWidget(self.favorites_button)
         layout.addLayout(buttons)
         resources_ok = (owner.resources / "dictionary.db").exists() and (owner.resources / "translation/model/model.bin").exists()
@@ -223,6 +223,9 @@ class SettingsWindow(QDialog):
     def start(self):
         self.hide()
         QTimer.singleShot(180, self.owner.toggle)
+
+    def open_favorites(self):
+        self.owner.open_favorites()
 
     def showEvent(self, event):
         if self.isMinimized():
