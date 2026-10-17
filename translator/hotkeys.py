@@ -49,12 +49,12 @@ class Hotkeys:
     def apply(self, bindings, enabled=True):
         validate_bindings(bindings)
         parsed = [parse_hotkey(b) for b in bindings]
-        if len(set(parsed)) != 4:
-            raise ValueError("四个快捷键不能重复")
+        if len(set(parsed)) != 6:
+            raise ValueError("六个快捷键不能重复")
         previous = self.bindings[:]
         previous_registered = self.registered.copy()
         previous_enabled = self.enabled
-        desired = {100+i: parsed[i] for i in (range(4) if enabled else [3])}
+        desired = {100+i: parsed[i] for i in (range(6) if enabled else [3])}
         kept = {id_: pair for id_, pair in previous_registered.items() if desired.get(id_) == pair}
         removed = {id_: pair for id_, pair in previous_registered.items() if id_ not in kept}
         for id_ in removed:

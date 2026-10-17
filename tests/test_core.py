@@ -65,9 +65,9 @@ def test_placement_respects_negative_monitors_and_edges(selection, size, area, e
 def test_settings_atomic_and_duplicate_bindings_rejected(tmp_path):
     store = SettingsStore(tmp_path / "settings.json")
     defaults = store.load()
-    defaults["bindings"] = ["F8", "F9", "F10", "F11"]
+    defaults["bindings"] = ["F8", "F9", "F10", "F11", "F6", "F7"]
     store.save(defaults)
-    assert store.load()["bindings"] == ["F8", "F9", "F10", "F11"]
+    assert store.load()["bindings"] == ["F8", "F9", "F10", "F11", "F6", "F7"]
     with pytest.raises(ValueError):
         validate_bindings(["Ctrl+Q", "Ctrl+Q", "F9", "F10"])
     with pytest.raises(ValueError):
@@ -80,9 +80,9 @@ def test_new_defaults_and_legacy_default_migration(tmp_path):
     import json
     path = tmp_path / "settings.json"
     store = SettingsStore(path)
-    assert store.load()["bindings"] == ["CapsLock", ",", ".", "Ctrl+Q"]
+    assert store.load()["bindings"] == ["CapsLock", ",", ".", "Ctrl+Q", "Ctrl+Shift+A", "Ctrl+Shift+S"]
     path.write_text(json.dumps({"bindings": ["Ctrl+Alt+Q", "Ctrl+Alt+Up", "Ctrl+Alt+Down"]}))
-    assert store.load()["bindings"] == ["CapsLock", ",", ".", "Ctrl+Q"]
+    assert store.load()["bindings"] == ["CapsLock", ",", ".", "Ctrl+Q", "Ctrl+Shift+A", "Ctrl+Shift+S"]
 
 
 def test_legacy_custom_keys_preserved_and_new_toggle_avoids_collision(tmp_path):
@@ -91,7 +91,7 @@ def test_legacy_custom_keys_preserved_and_new_toggle_avoids_collision(tmp_path):
     path.write_text(json.dumps({"bindings": ["Ctrl+Q", "F7", "F8"]}))
     settings = SettingsStore(path).load()
     assert settings["bindings"][:3] == ["Ctrl+Q", "F7", "F8"]
-    assert len(settings["bindings"]) == 4
+    assert len(settings["bindings"]) == 6
     assert settings["bindings"][3] != "Ctrl+Q"
     SettingsStore(path).save(settings)
     assert SettingsStore(path).load() == settings

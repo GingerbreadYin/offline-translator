@@ -24,10 +24,10 @@ def test_registration_failure_restores_previous_bindings():
             self.active.pop(id_, None)
     backend = Backend()
     keys = Hotkeys(backend)
-    keys.apply(["F5", "F6", "F7", "F8"])
+    keys.apply(["F5", "F6", "F7", "F8", "Ctrl+Shift+A", "Ctrl+Shift+S"])
     with pytest.raises(ValueError):
-        keys.apply(["F8", "F9", "F10", "F11"])
-    assert backend.active == {100: (0, 116), 101: (0, 117), 102: (0, 118), 103: (0, 119)}
+        keys.apply(["F8", "F9", "F10", "F11", "Ctrl+Shift+A", "Ctrl+Shift+S"])
+    assert backend.active == {100: (0, 116), 101: (0, 117), 102: (0, 118), 103: (0, 119), 104: (6,65), 105: (6,83)}
     keys.close()
     assert backend.active == {}
 
@@ -44,9 +44,9 @@ def test_pause_releases_three_keys_but_keeps_toggle_and_failed_resume_stays_paus
             self.active.pop(id_, None)
     backend = Backend()
     keys = Hotkeys(backend)
-    bindings = ["CapsLock", ",", ".", "Ctrl+Q"]
+    bindings = ["CapsLock", ",", ".", "Ctrl+Q", "Ctrl+Shift+A", "Ctrl+Shift+S"]
     keys.apply(bindings)
-    assert backend.active == {100: (0, 20), 101: (0, 188), 102: (0, 190), 103: (2, 81)}
+    assert backend.active == {100: (0, 20), 101: (0, 188), 102: (0, 190), 103: (2, 81), 104: (6,65), 105: (6,83)}
     keys.apply(bindings, enabled=False)
     assert backend.active == {103: (2, 81)}
     assert 103 not in backend.removed
@@ -56,5 +56,5 @@ def test_pause_releases_three_keys_but_keeps_toggle_and_failed_resume_stays_paus
     assert keys.bindings == bindings
     backend.occupied.clear()
     keys.apply(bindings, enabled=True)
-    assert set(backend.active) == {100, 101, 102, 103}
+    assert set(backend.active) == {100, 101, 102, 103, 104, 105}
     assert 103 not in backend.removed

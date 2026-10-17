@@ -5,12 +5,12 @@ import os
 from pathlib import Path
 import re
 
-DEFAULT_BINDINGS = ("CapsLock", ",", ".", "Ctrl+Q")
+DEFAULT_BINDINGS = ("CapsLock", ",", ".", "Ctrl+Q", "Ctrl+Shift+A", "Ctrl+Shift+S")
 LEGACY_DEFAULT_BINDINGS = ("Ctrl+Alt+Q", "Ctrl+Alt+Up", "Ctrl+Alt+Down")
 
 
 def default_settings():
-    return {"bindings": list(DEFAULT_BINDINGS), "schema_version": 2}
+    return {"bindings": list(DEFAULT_BINDINGS), "schema_version": 3}
 
 
 @dataclass(frozen=True)
@@ -99,8 +99,8 @@ def place_result(selection, size, area):
 
 
 def validate_bindings(bindings):
-    if not isinstance(bindings, list) or len(bindings) != 4 or not all(isinstance(b, str) for b in bindings) or len({b.lower() for b in bindings}) != 4:
-        raise ValueError("四个快捷键不能为空或重复")
+    if not isinstance(bindings, list) or len(bindings) != 6 or not all(isinstance(b, str) for b in bindings) or len({b.lower() for b in bindings}) != 6:
+        raise ValueError("六个快捷键不能为空或重复")
     for binding in bindings:
         parts = binding.split("+")
         if not binding or parts[-1].lower() in {"ctrl", "alt", "shift", "win", "meta", "esc", "escape"}:
@@ -124,6 +124,17 @@ class SettingsStore:
                     occupied = {b.lower() for b in bindings}
                     toggle = next(b for b in ("Ctrl+Q", "Ctrl+Alt+S", "Ctrl+Alt+F12", "Ctrl+Alt+F11") if b.lower() not in occupied)
                     settings = {"bindings": bindings + [toggle], "schema_version": 2}
+            bindings = settings["bindings"]
+            if isinstance(bindings, list) and len(bindings) == 4 and all(isinstance(b, str) for b in bindings):
+                from .hotkeys import parse_hotkey
+                occupied = {parse_hotkey(b) for b in bindings}
+                bindings = bindings[:]
+                for preferred in DEFAULT_BINDINGS[4:]:
+                    candidates = [preferred] + [f"Ctrl+Alt+F{i}" for i in range(12, 0, -1)]
+                    added = next(b for b in candidates if parse_hotkey(b) not in occupied)
+                    bindings.append(added)
+                    occupied.add(parse_hotkey(added))
+                settings = {"bindings": bindings, "schema_version": 3}
             validate_bindings(settings["bindings"])
             return settings
         except (ValueError, KeyError, TypeError) as exc:

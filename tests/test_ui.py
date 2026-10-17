@@ -64,11 +64,11 @@ def test_result_background_stays_readable_with_dark_system_palette(app):
 
 def test_editing_shortcuts_suspends_global_keys_and_close_restores(app, tmp_path):
     class Keys:
-        def __init__(self): self.bindings = ["F6", "F7", "F8", "F9"]
+        def __init__(self): self.bindings = ["F6", "F7", "F8", "F9", "Ctrl+Shift+A", "Ctrl+Shift+S"]
         def close(self): self.bindings = []
         def apply(self, bindings, enabled=True): self.bindings = bindings[:]
     class Owner:
-        settings = {"bindings": ["F6", "F7", "F8", "F9"]}
+        settings = {"bindings": ["F6", "F7", "F8", "F9", "Ctrl+Shift+A", "Ctrl+Shift+S"]}
         enabled = True
         hotkeys = Keys()
         resources = tmp_path
@@ -81,7 +81,7 @@ def test_editing_shortcuts_suspends_global_keys_and_close_restores(app, tmp_path
     assert owner.hotkeys.bindings == []
     window.close()
     app.processEvents()
-    assert owner.hotkeys.bindings == ["F6", "F7", "F8", "F9"]
+    assert owner.hotkeys.bindings == ["F6", "F7", "F8", "F9", "Ctrl+Shift+A", "Ctrl+Shift+S"]
 
 
 @pytest.fixture
@@ -130,7 +130,7 @@ def test_pause_cancels_result_and_resume_restores_four_keys(controller):
     owner.action(0)
     assert owner.flow.state == "idle" and not owner.overlays
     owner.action(3)
-    assert owner.enabled and set(backend.active) == {100,101,102,103}
+    assert owner.enabled and set(backend.active) == {100,101,102,103,104,105}
     assert "已启用" in owner.tray.toolTip()
 
 
@@ -204,3 +204,71 @@ def test_two_distinct_queued_enable_presses_both_take_effect(controller, app):
     owner.native.nativeEventFilter(b"windows_generic_MSG", ctypes.addressof(message))
     app.processEvents()
     assert owner.enabled
+
+
+def test_region_favorite_saves_all_text_and_current_meaning(controller):
+    from translator.core import Result, Meaning, Navigator
+    owner, _ = controller
+    owner.flow.toggle()
+    job = owner.flow.begin()
+    owner.finished(job, Result('issue', [Meaning('n.','问题'),Meaning('v.','发行')]), '')
+    owner.action(5)
+    assert owner.favorites.list()[0]['translation'] == 'n. 问题'
+    owner.action(2)
+    owner.action(5)
+    assert len(owner.favorites.list()) == 1
+    assert owner.favorites.list()[0]['translation'] == 'v. 发行'
+    owner.cancel()
+    owner.action(5)
+    assert len(owner.favorites.list()) == 1
+
+
+def test_full_refresh_hides_old_results_and_rejects_stale_job(controller, monkeypatch):
+    import translator.window_translation as module
+    from PIL import Image
+    from translator.core import Result
+    from translator.fullpage import TranslatedParagraph
+    owner, _ = controller
+    full = owner.full
+    monkeypatch.setattr(module,'foreground_window',lambda: 1234)
+    monkeypatch.setattr(module,'window_geometry',lambda h,a: ((100,0,700,500),(0,0,1200,900)))
+    image = Image.new('RGB',(700,500),'white')
+    full.capture.closed = False
+    monkeypatch.setattr(full.capture,'snapshot',lambda: image.copy())
+    full.hwnd = 1234
+    full.geometry = ((100,0,700,500),(0,0,1200,900))
+    full.tick()
+    full.gate.changed_at -= 1
+    requests = []
+    owner.worker.submit = requests.append
+    full.tick()
+    job = requests[-1][0]
+    data = {'paragraphs':[TranslatedParagraph((20,100,240,25),Result('This is a test.',translation='这是测试。'))],
+            'obstacles':[(20,100,240,25)]}
+    full.finished(job,data,'')
+    assert full.overlay.layer.isVisible()
+    image.putpixel((0,0),(0,0,0))
+    # A frame can change after the last timer tick but before inference returns.
+    full.finished(job,data,'')
+    assert not full.overlay.layer.isVisible()
+    full.finished(job,data,'')
+    assert not full.overlay.layer.isVisible()
+    owner.action(3)
+    assert not full.active and not full.timer.isActive()
+
+
+def test_full_favorite_saves_only_hovered_translation(controller, monkeypatch):
+    from translator.core import Result
+    from translator.fullpage import TranslatedParagraph
+    from PySide6.QtGui import QCursor
+    owner,_ = controller
+    full = owner.full
+    monkeypatch.setattr(full,'tick',lambda: None)
+    full.hwnd = 1234
+    data = [TranslatedParagraph((20,100,240,25),Result('First sentence.',translation='第一句。')),
+            TranslatedParagraph((20,200,240,25),Result('Second sentence.',translation='第二句。'))]
+    full.overlay.display(data,[],(100,0,700,500),(0,0,1200,900),(700,500))
+    label,_ = full.overlay.labels[1]
+    monkeypatch.setattr(QCursor,'pos',lambda: label.mapToGlobal(label.rect().center()))
+    owner.action(5)
+    assert [r['original'] for r in owner.favorites.list()] == ['Second sentence.']

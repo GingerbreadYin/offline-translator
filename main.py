@@ -14,8 +14,23 @@ def main():
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--ui-smoke", action="store_true")
     parser.add_argument("--worker-test", action="store_true")
+    parser.add_argument("--capture-test", action="store_true")
+    parser.add_argument("--window-test", action="store_true")
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
+    if args.capture_test or args.window_test:
+        if args.capture_test:
+            from tools.probe_capture import probe_capture
+            data = probe_capture()
+        else:
+            from tools.probe_window import probe_window
+            data = probe_window(resource_root())
+        report = json.dumps(data,ensure_ascii=False,indent=2)
+        if args.report:
+            args.report.write_text(report,encoding='utf-8')
+        elif sys.stdout is not None:
+            print(report)
+        return
     switch_checked = False
     def mark(stage):
         if args.ui_smoke and args.report:
@@ -52,7 +67,7 @@ def main():
     mark("creating-controller")
     if args.ui_smoke:
         from translator.core import SettingsStore
-        SettingsStore(Path("build/smoke-settings.json")).save({"bindings": ["Ctrl+Alt+F21", "Ctrl+Alt+F22", "Ctrl+Alt+F23", "Ctrl+Alt+F24"]})
+        SettingsStore(Path("build/smoke-settings.json")).save({"bindings": ["Ctrl+Alt+F21", "Ctrl+Alt+F22", "Ctrl+Alt+F23", "Ctrl+Alt+F24", "Ctrl+Alt+F19", "Ctrl+Alt+F20"]})
     controller = Controller(app, resource_root(), Path("build/smoke-settings.json") if args.ui_smoke else None)
     mark("controller-ready")
     if args.ui_smoke:
@@ -60,13 +75,13 @@ def main():
             nonlocal switch_checked
             try:
                 controller.settings_window.hide()
-                assert set(controller.hotkeys.registered) == {100,101,102,103}, controller.settings_window.status.text()
+                assert set(controller.hotkeys.registered) == {100,101,102,103,104,105}, controller.settings_window.status.text()
                 controller.action(3)
                 assert not controller.enabled and set(controller.hotkeys.registered) == {103}
                 controller.action(0)
                 assert controller.flow.state == "idle"
                 controller.action(3)
-                assert controller.enabled and set(controller.hotkeys.registered) == {100,101,102,103}
+                assert controller.enabled and set(controller.hotkeys.registered) == {100,101,102,103,104,105}
                 switch_checked = True
                 mark("shutdown-started")
                 controller.shutdown()

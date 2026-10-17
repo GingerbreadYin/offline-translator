@@ -4,7 +4,9 @@ from contextlib import closing
 import re
 import sqlite3
 import threading
+from collections import OrderedDict
 from .core import Result, parse_meanings
+from .fullpage import group_lines, TranslatedParagraph, bounds
 
 
 class Dictionary:
@@ -72,19 +74,38 @@ class Pipeline:
         self.ocr = None
         self.lock = threading.Lock()
         self.verified = False
+        self.cache = OrderedDict()
 
     def recognize(self, image):
+        result = self.recognize_lines(image)
+        if not result:
+            raise ValueError("未识别到英文，请重新框选")
+        return "\n".join(item[1] for item in result)
+
+    def recognize_lines(self, image):
         if self.ocr is None:
             from rapidocr_onnxruntime import RapidOCR
             self.ocr = RapidOCR(det_use_cuda=False, cls_use_cuda=False, rec_use_cuda=False, intra_op_num_threads=4)
         import numpy as np
         data = np.array(image.convert("RGB"))[:, :, ::-1].copy()
         result, _ = self.ocr(data)
-        if not result:
-            raise ValueError("未识别到英文，请重新框选")
-        return "\n".join(item[1] for item in result)
+        return result or []
 
-    def run(self, image):
+    def translate_paragraphs(self, paragraphs, cancelled=None):
+        translated = []
+        for paragraph in paragraphs:
+            if cancelled and cancelled():
+                raise InterruptedError('翻译已取消')
+            text = paragraph.text
+            if text not in self.cache:
+                self.cache[text] = self.lookup.lookup(text)
+                if len(self.cache) > 256:
+                    self.cache.popitem(last=False)
+            self.cache.move_to_end(text)
+            translated.append(TranslatedParagraph(paragraph.rect, self.cache[text]))
+        return translated
+
+    def run(self, image, full=False, cancelled=None):
         with self.lock:
             if not self.verified:
                 from .resources import verify_resources
@@ -92,4 +113,8 @@ class Pipeline:
                 if invalid:
                     raise ValueError("离线资源缺失或损坏，请重新解压完整发行包：" + ", ".join(invalid[:3]))
                 self.verified = True
+            if full:
+                lines = self.recognize_lines(image)
+                return {'paragraphs': self.translate_paragraphs(group_lines(lines),cancelled),
+                        'obstacles': [bounds(item[0]) for item in lines]}
             return self.lookup.lookup(self.recognize(image))

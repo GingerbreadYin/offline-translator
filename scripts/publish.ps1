@@ -10,7 +10,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
 if ($LASTEXITCODE -ne 0) { throw 'Offline resource test failed' }
 & $pythonExe main.py --worker-test
 if ($LASTEXITCODE -ne 0) { throw 'Worker process test failed' }
-& $pythonExe -m PyInstaller --noconfirm --clean --onedir --windowed --name OfflineTranslator --collect-data rapidocr_onnxruntime --collect-binaries ctranslate2 --collect-data ctranslate2 --collect-all sentencepiece --exclude-module PySide6.QtWebEngine --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.QtWebEngineWidgets main.py
+& $pythonExe -m PyInstaller --noconfirm --clean --onedir --windowed --name OfflineTranslator --collect-data rapidocr_onnxruntime --collect-binaries ctranslate2 --collect-data ctranslate2 --collect-all sentencepiece --collect-all windows_capture --exclude-module PySide6.QtWebEngine --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.QtWebEngineWidgets main.py
 if ($LASTEXITCODE -ne 0) { throw 'Executable build failed' }
 $packageRoot = Join-Path (Get-Location) 'dist/OfflineTranslator'
 New-Item -ItemType Directory -Force (Join-Path $packageRoot 'resources') | Out-Null
@@ -20,10 +20,10 @@ Copy-Item -LiteralPath 'README.md','THIRD-PARTY-NOTICES.md','requirements.lock.t
 & $pythonExe tools/collect_licenses.py $packageRoot
 if ($LASTEXITCODE -ne 0) { throw 'License collection failed' }
 $exePath = Join-Path $packageRoot 'OfflineTranslator.exe'
-foreach ($mode in @('self-test','worker-test','ui-smoke')) {
+foreach ($mode in @('self-test','worker-test','ui-smoke','capture-test','window-test')) {
     $reportPath = Join-Path (Get-Location) "build/packaged-$mode.json"
     $testProcess = Start-Process -FilePath $exePath -ArgumentList "--$mode",'--report',$reportPath -WindowStyle Hidden -PassThru
-    if (-not $testProcess.WaitForExit(45000)) { $testProcess.Kill(); throw "Packaged $mode timed out" }
+    if (-not $testProcess.WaitForExit(60000)) { $testProcess.Kill(); throw "Packaged $mode timed out" }
     $testProcess.Refresh()
     if ($testProcess.ExitCode -ne 0) { throw "Packaged $mode failed; inspect $reportPath" }
     $report = Get-Content -LiteralPath $reportPath -Raw -Encoding UTF8 | ConvertFrom-Json

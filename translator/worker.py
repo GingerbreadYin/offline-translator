@@ -5,17 +5,21 @@ import multiprocessing
 def inference_loop(connection, resources):
     from PIL import Image
     from .services import Pipeline
+    resources, cancel_version = resources
     pipeline = Pipeline(resources)
     connection.send(None)
     while True:
         try:
-            job, size, pixels = connection.recv()
+            job, size, pixels, version = connection.recv()
         except EOFError:
             return
         image = Image.frombytes("RGB", size, pixels)
         del pixels
         try:
-            connection.send((job, pipeline.run(image), ""))
+            if cancel_version.value != version:
+                raise InterruptedError('翻译已取消')
+            connection.send((job, pipeline.run(image, full=isinstance(job, tuple) and job[0] == 'full',
+                                               cancelled=lambda: cancel_version.value != version), ""))
         except Exception as exc:
             connection.send((job, None, str(exc)))
         finally:
@@ -25,6 +29,10 @@ def inference_loop(connection, resources):
 class ProcessWorker:
     def __init__(self, target=inference_loop, config=None):
         context = multiprocessing.get_context("spawn")
+        self.cancel_version = context.Value('L',0)
+        self.cooperative = target is inference_loop
+        if self.cooperative:
+            config = (config,self.cancel_version)
         self.connection, child = context.Pipe()
         self.process = context.Process(target=target, args=(child, config), daemon=True)
         self.busy = True
@@ -44,6 +52,8 @@ class ProcessWorker:
 
     def cancel_pending(self):
         self.pending = None
+        with self.cancel_version.get_lock():
+            self.cancel_version.value += 1
 
     def poll(self):
         results = []
@@ -61,7 +71,7 @@ class ProcessWorker:
             raise RuntimeError("离线引擎意外退出，请重启软件")
         if not self.busy and self.pending is not None:
             request, self.pending = self.pending, None
-            self.connection.send(request)
+            self.connection.send(request+(self.cancel_version.value,) if self.cooperative else request)
             self.busy = True
         return results
 

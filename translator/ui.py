@@ -17,6 +17,9 @@ from .core import Navigator, SettingsStore, Workflow, place_result, default_sett
 from . import __version__
 from .hotkeys import Hotkeys
 from .worker import ProcessWorker
+from .favorites import FavoritesStore
+from .full_ui import FavoritesWindow, result_text
+from .window_translation import WindowTranslation
 
 STYLE = """
 QWidget {font-family: 'Microsoft YaHei UI'; font-size: 13px; color: #192b3d;}
@@ -37,7 +40,7 @@ class NativeFilter(QAbstractNativeEventFilter):
     def nativeEventFilter(self, event_type, message):
         if event_type in (b"windows_generic_MSG", b"windows_dispatcher_MSG"):
             msg = wintypes.MSG.from_address(int(message))
-            if msg.message == 0x0312 and 100 <= msg.wParam <= 103:
+            if msg.message == 0x0312 and 100 <= msg.wParam <= 105:
                 action = int(msg.wParam) - 100
                 epoch = self.epoch_provider(action) if self.epoch_provider else None
                 def dispatch():
@@ -165,15 +168,15 @@ class SettingsWindow(QDialog):
         self.setMinimumWidth(490)
         self.setStyleSheet(STYLE)
         layout = QVBoxLayout(self)
-        title = QLabel("离线框选翻译")
+        title = QLabel("离线翻译")
         title.setObjectName("title")
         layout.addWidget(title)
-        description = QLabel("按主快捷键 → 拖动框选 → 松开自动翻译\n再次按主快捷键关闭译文。单词按另外两键切换义项。")
+        description = QLabel("框选键 → 拖动框选 → 松开自动翻译；再次按下关闭。\n全屏键翻译当前窗口；收藏键保存框选全部或鼠标所指译文。")
         description.setStyleSheet("padding: 10px 0; color: #58718a;")
         layout.addWidget(description)
         form = QFormLayout()
         self.edits = []
-        for label, binding in zip(("框选 / 关闭", "上一个词义", "下一个词义", "启用 / 暂停"), owner.settings["bindings"]):
+        for label, binding in zip(("框选 / 关闭", "上一个词义", "下一个词义", "启用 / 暂停", "全屏翻译 / 关闭", "收藏翻译"), owner.settings["bindings"]):
             edit = QKeySequenceEdit(QKeySequence(binding))
             edit.setMaximumSequenceLength(1)
             self.edits.append(edit)
@@ -201,7 +204,7 @@ class SettingsWindow(QDialog):
         previous = self.owner.settings["bindings"][:]
         try:
             self.owner.hotkeys.apply(bindings, enabled=self.owner.enabled)
-            settings = {"bindings": bindings, "schema_version": 2}
+            settings = {"bindings": bindings, "schema_version": 3}
             try:
                 self.owner.store.save(settings)
             except OSError:
@@ -218,6 +221,8 @@ class SettingsWindow(QDialog):
         QTimer.singleShot(180, self.owner.toggle)
 
     def showEvent(self, event):
+        if hasattr(self.owner, 'full') and self.owner.full.active:
+            self.owner.cancel()
         if hasattr(self.owner, "invalidate_shortcuts"):
             self.owner.invalidate_shortcuts()
         self.owner.hotkeys.close()
@@ -271,6 +276,9 @@ class Controller(QObject):
         self.overlays = []
         self.navigator = Navigator([])
         self.last_result = None
+        self.full = WindowTranslation(self)
+        self.favorites = FavoritesStore(self.store.path.with_name('favorites.db'))
+        self.favorites_window = FavoritesWindow(self.favorites)
         self.selection, self.area = (0, 0, 10, 10), (0, 0, 1920, 1080)
         self.settings_window = SettingsWindow(self)
         icon = QPixmap(32, 32)
@@ -286,6 +294,8 @@ class Controller(QObject):
         self.enable_action.setCheckable(True)
         self.enable_action.setChecked(True)
         self.capture_action = menu.addAction("开始框选", self.toggle)
+        self.full_action = menu.addAction("全屏翻译 / 关闭", self.toggle_full)
+        menu.addAction("收藏列表", self.open_favorites)
         menu.addAction("设置", self.open_settings)
         menu.addSeparator()
         menu.addAction("退出", self.shutdown)
@@ -309,6 +319,7 @@ class Controller(QObject):
         self.tray.setToolTip(f"离线框选翻译 v{__version__} · {status}")
         self.enable_action.setChecked(self.enabled)
         self.capture_action.setEnabled(self.enabled)
+        self.full_action.setEnabled(self.enabled)
         self.settings_window.start_button.setEnabled(self.enabled)
         self.settings_window.status.setText(f"当前：{status}。启用／暂停快捷键：{self.settings['bindings'][3]}。")
 
@@ -341,6 +352,7 @@ class Controller(QObject):
                 self.finished(job, result, error)
         except (RuntimeError, OSError) as exc:
             self.worker_timer.stop()
+            self.full.stop()
             if self.flow.state == "processing":
                 self.finished(self.flow.generation, None, str(exc))
             self.tray.showMessage("离线引擎错误", str(exc))
@@ -351,7 +363,7 @@ class Controller(QObject):
         self.settings_window.activateWindow()
 
     def check_escape(self):
-        if self.flow.state != "idle" and ctypes.windll.user32.GetAsyncKeyState(0x1B) & 0x8000:
+        if (self.flow.state != "idle" or self.full.active) and ctypes.windll.user32.GetAsyncKeyState(0x1B) & 0x8000:
             self.cancel()
 
     def action(self, action):
@@ -363,6 +375,10 @@ class Controller(QObject):
             return
         elif action == 0:
             self.toggle()
+        elif action == 4:
+            self.toggle_full()
+        elif action == 5:
+            self.save_favorite()
         elif self.flow.state == "showing" and self.navigator.meanings:
             self.navigator.move(-1 if action == 1 else 1)
             self.show_result()
@@ -374,6 +390,8 @@ class Controller(QObject):
         self.overlays = []
 
     def cancel(self):
+        if hasattr(self, 'full'):
+            self.full.stop()
         self.flow.cancel()
         self.worker.cancel_pending()
         self.clear_overlays()
@@ -384,6 +402,8 @@ class Controller(QObject):
     def toggle(self):
         if self.shutting_down or not self.enabled:
             return
+        if self.full.active:
+            self.cancel()
         if self.flow.state != "idle":
             self.cancel()
             return
@@ -412,6 +432,9 @@ class Controller(QObject):
         image.close()
 
     def finished(self, job, result, error):
+        if isinstance(job,tuple) and job[0] == 'full':
+            self.full.finished(job,result,error)
+            return
         if not self.flow.finish(job):
             return
         self.last_result = result
@@ -433,6 +456,39 @@ class Controller(QObject):
             text, caption = self.last_result.translation, "英 → 中 · 本机离线翻译"
         self.result.display(text, caption, self.selection, self.area)
 
+    def toggle_full(self):
+        if self.shutting_down or not self.enabled:
+            return
+        self.full.start()
+
+    def save_favorite(self):
+        if self.shutting_down or not self.enabled:
+            return
+        if self.full.active:
+            self.full.tick()
+            result = self.full.overlay.hovered(QCursor.pos())
+            text = result_text(result) if result else ''
+        else:
+            result = self.last_result if self.flow.state == 'showing' and self.result.isVisible() else None
+            meaning = self.navigator.current
+            text = ((meaning.pos+' '+meaning.text).strip() if meaning else result.translation) if result else ''
+        if not result or not text:
+            self.tray.showMessage('没有可收藏的译文','全屏翻译时请将鼠标指向译文；框选翻译时请先等待结果。',msecs=1800)
+            return
+        try:
+            status = self.favorites.save(result.original,text)
+            self.tray.showMessage({'saved':'已收藏','exists':'已收藏，无需重复保存','updated':'已更新收藏释义'}[status],result.original[:100],msecs=1800)
+            if self.favorites_window.isVisible():
+                self.favorites_window.refresh()
+        except Exception as exc:
+            self.tray.showMessage('收藏失败',str(exc))
+
+    def open_favorites(self):
+        self.cancel()
+        self.favorites_window.show()
+        self.favorites_window.raise_()
+        self.favorites_window.activateWindow()
+
     def shutdown(self):
         self.shutting_down = True
         self.invalidate_shortcuts()
@@ -441,5 +497,7 @@ class Controller(QObject):
         self.escape_timer.stop()
         self.worker_timer.stop()
         self.tray.hide()
+        self.full.overlay.close()
+        self.favorites_window.close()
         self.worker.close()
         self.app.quit()
